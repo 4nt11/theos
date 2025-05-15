@@ -63,7 +63,7 @@ To run the kernel, you can do one of the following:
 ### GDB Script
 You can run the kernel using the provided GDB script. The script assumes you have QEMU installed. If you don't, install it and add it to your $PATH.
 ```
-gdb -x gdb
+gdb -x gdb_script
 ```
 ### Using QEMU
 You can also run the kernel by executing it directly with QEMU.
