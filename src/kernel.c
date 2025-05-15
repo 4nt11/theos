@@ -4,6 +4,7 @@
 #include "idt/idt.h"
 #include "io/io.h"
 #include "memory/heap/kheap.h"
+#include "memory/paging/paging.h"
 
 uint16_t* video_mem = 0;
 uint16_t terminal_row = 0;
@@ -77,19 +78,9 @@ void kernel_main()
 	print("[*] booting up...\n");
 	// initialize the heap
 	kheap_init();
+	enable_paging();
 
 	// initialize the interrupt descriptor table.
 	idt_init();
-
-	void* ptr = kmalloc(50);
-	void* ptr2 = kmalloc(5000);
-	void* ptr3 = kmalloc(5600);
-	kfree(ptr);
-	void* ptr4 = kmalloc(50);
-
-	if ( ptr && ptr2 && ptr3 && ptr4 )
-	{
-		print("alloc good.");
-	}
 
 }
