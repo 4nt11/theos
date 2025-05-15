@@ -17,6 +17,7 @@ struct paging_4gb_chunk
 	uint32_t* directory_entry;
 };
 
+uint32_t* paging_4gb_chunk_get_directory(struct paging_4gb_chunk* chunk);
 struct paging_4gb_chunk* paging_new_4gb(uint8_t flags);
 void paging_switch(uint32_t* directory);
 void enable_paging();
