@@ -35,5 +35,8 @@ if you want to just launch the kernel ~(there's not much to do in there for now)
 qemu-system-i386 -hda build/os.bin
 ```
 
+## AI disclaimer
+although I do use AI, not a single line of code was written by an AI. I use AI mostly for explainations of things that I can't quite get the hang of or to help me document the code.
+
 ## credits
 this OS is made possible thanks to the amazing content made by the people at Dragonzap. thx for the course :)
