@@ -1,0 +1,36 @@
+# theos
+*theos* is a kernel project made with the intention of understanding how operating systems work. a secondary purpose is to serve as an education tool for my future students.
+
+## docs
+all the documentation is in the `docs/` directory.
+
+## building
+to build the project, you will need a cross compiler. if you don't know how to get one, please read [this](https://wiki.osdev.org/GCC_Cross-Compiler#Preparing_for_the_build). after that, be sure to change the environment variables found in the `build.sh` script to point to your binaries.
+
+```
+git clone https://github.com/4nt11/theos
+cd theos
+chmod +x build.sh
+vim build.sh # make your changes!
+./build.sh
+```
+
+## running
+you can run the kernel using two main approaches.
+
+### gdb script
+if you want a debugging session, you can use the GDB script provided. it sets up all the symbols needed for debugging and step-by-step execution.
+
+```
+gdb -x gdb_script
+```
+
+### qemu
+if you want to just launch the kernel ~(there's not much to do in there for now)~, you can use `qemu-system-i386`.
+
+```
+qemu-system-i386 -hda build/os.bin
+```
+
+## credits
+this OS is made possible thanks to the amazing content made by the people at Dragonzap. thx for the course :)
