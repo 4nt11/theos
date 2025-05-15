@@ -2,6 +2,7 @@
 #include "heap.h"
 #include "config.h"
 #include "kernel.h"
+#include "status.h"
 #include "memory/memory.h"
 
 struct heap kernel_heap;
@@ -31,7 +32,7 @@ void* kzalloc(size_t size)
 	void* ptr = kmalloc(size);
 	if(!ptr)
 	{
-		return -ENOMEM;
+		return 0;
 	}
 	memset(ptr, 0x00, size);
 	return ptr;
