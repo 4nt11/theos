@@ -15,6 +15,9 @@ vim build.sh # make your changes!
 ./build.sh
 ```
 
+## built binaries
+i also leave some built binaries in the `bin/` directory. use them if you don't want to get your own cross-compiller. i dont recommend it, since building the cross-compilling tools are part of the learning experience, but hey, you do you.
+
 ## running
 you can run the kernel using two main approaches.
 
