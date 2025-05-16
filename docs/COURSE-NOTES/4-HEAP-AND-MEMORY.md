@@ -724,3 +724,156 @@ Check [[Paging Notes]] for the attribute table.
 - We can pretend we have the maximum amount of memory even if we do not.
 - This is achieved by creating page tables that are not present. Once a process accesses this non-present address, a page fault will occur. We can then load the page back into memory and the process had no idea of this happening.
 - 100MB of system memory can act as if it has access to the full 4GB on a 32 bit architecture.
+	- This would work, but accessing non-present pages would cause a page fault.
+
+## 2.9. Benefits to paging.
+- Processes can access the same virtual memory, but they won't overwrite each other.
+- Security is an added benefit, as we can map out physical memory that we don't want processes to see.
+- It can be used to prevent overwritting sensitive sections of memory.
+- And many more.
+## 2.10. Enabling paging
+Paging can be enabled using a few lines of Assembly code. It'd look like this:
+```
+[BITS 32]
+
+section .asm
+
+global paging_load_directory
+global enable_paging
+
+paging_load_directory:
+	push ebp
+	mov esp, ebp
+	mov eax, [ebp+8]
+	mov cr3, eax
+	pop ebp
+	ret
+
+enable_paging:
+	pusb ebp
+	mov esp, ebp
+	mov eax, cr0
+	or eax, 0x80000000
+	mov cr0, eax
+	pop ebp
+	ret
+```
+This code will be explained later on when we implement paging within the kernel.
+
+# 3. Implementing Paging
+Paging wasn't as hard as the heap to enable. Yes, enable. We haven't yet implemented proper paging with virtual memory. But we will! For now, let's see what we did to enable it.
+
+## kheap.h, kheap.c
+### `kheap.c`
+First we had to implement `kzalloc`. A function that allocates memory with `kmalloc` and then zeroes it out with `memset`.
+```
+void* kzalloc(size_t size)
+{
+        void* ptr = kmalloc(size);
+        if(!ptr)
+        {
+                return 0;
+        }
+        memset(ptr, 0x00, size);
+        return ptr;
+}
+```
+- `void* kzalloc(size_t size)`: function definition. nothing fancy. we just take a size_t `size`.
+- `        void* ptr = kmalloc(size);`: here we create our section on the heap with `size` size.
+- `        if(!ptr)`: if something went wrong while getting some memory (EINVARG or ENOMEM)...
+- `                return 0;`: we return 0.
+- `        memset(ptr, 0x00, size);`: here we `memset` the entire region of memory to zero.
+- `        return ptr;`: and return that pointer to the memory address that we just zeroed out.
+
+And in the `kheap.h` we just added the prototype of our function for it to be called by other files.
+
+### `kheap.h`
+```
+void* kzalloc(size_t size);
+```
+It's practically the same thing as `kmalloc`.
+## paging.asm, paging.h and paging.c.
+Here's where the magic of enabling paging happens.
+### `paging.asm`
+In this file, we write the routines needed to enable paging. There's two, `enable_paging` and `paging_load_directory`.
+```
+[BITS 32]
+
+section .asm
+global paging_load_directory
+global enable_paging
+
+paging_load_directory:
+        push ebp
+        mov ebp, esp
+        mov eax, [ebp+8]
+        mov cr3, eax
+        pop ebp
+        ret
+
+enable_paging:
+        push ebp
+        mov ebp, esp
+        mov eax, cr0
+        or eax, 0x80000000
+        mov cr0, eax
+        pop ebp
+        ret
+```
+- `paging_load_directory:`: label setup.
+- `        push ebp`: stack setup, nothing new.
+- `        mov ebp, esp`: stack setup, nothing new.
+- `        mov eax, [ebp+8]`: here we take the argument passed onto us by the C code. we'll see more on that later.
+- `        mov cr3, eax`: here we move the `eax` register (containing the argument) and the move it into the `cr3` register. we do this because we cannot change `cr3` directly.
+- `        pop ebp`: here we delete our stack.
+- `        ret `: and we return!
+
+- `enable_paging:`: label setup.
+- `        push ebp`: stack setup, nothing new.
+- `        mov ebp, esp`: stack setup, nothing new.
+- `        mov eax, cr0`: here we move the value of `cr0` into  `eax`.
+- `        or eax, 0x80000000`: here we set the 31st bit to 1. read the page on Assembly for info on HOW and WHY.
+- `        mov cr0, eax`: here we move `eax` into the `cr0` register.
+- `        pop ebp`: here we delete our stack.
+- `        ret`: and we return!
+
+### `paging.h`
+Before getting our hands dirty with some C code, we need to check the constants and structures created within our header file.
+```
+#define PAGING_CACHE_DISABLED   0b00010000
+#define PAGING_WRITE_THROUGH    0b00001000
+#define PAGING_ACCESS_FROM_ALL  0b00000100
+#define PAGING_IS_WRITEABLE     0b00000010
+#define PAGING_IS_PRESENT       0b00000001
+
+#define PAGING_TOTAL_ENTRIES_PER_TABLE 1024
+#define PAGING_PAGE_SIZE 4096
+
+struct paging_4gb_chunk
+{
+        uint32_t* directory_entry;
+};
+
+uint32_t* paging_4gb_chunk_get_directory(struct paging_4gb_chunk* chunk);
+struct paging_4gb_chunk* paging_new_4gb(uint8_t flags);
+void paging_switch(uint32_t* directory);
+void enable_paging();
+```
+
+- `#define PAGING_CACHE_DISABLED   0b00010000`: bitmask.
+- `#define PAGING_WRITE_THROUGH    0b00001000`: bitmask.
+- `#define PAGING_ACCESS_FROM_ALL  0b00000100`: bitmask.
+- `#define PAGING_IS_WRITEABLE     0b00000010`: bitmask.
+- `#define PAGING_IS_PRESENT       0b00000001`: bitmask.
+- `#define PAGING_TOTAL_ENTRIES_PER_TABLE 1024`:
+- `#define PAGING_PAGE_SIZE 4096`:
+- `struct paging_4gb_chunk`:
+- `        uint32_t* directory_entry;`:
+- `uint32_t* paging_4gb_chunk_get_directory(struct paging_4gb_chunk* chunk);`:
+- `struct paging_4gb_chunk* paging_new_4gb(uint8_t flags);`:
+- `void paging_switch(uint32_t* directory);`:
+- `void enable_paging();`:
+
+- describe paging.h, paging.c,
+- describe changes to kernel.c
+- describe changes to Makefile
