@@ -1,0 +1,27 @@
+name: THEOS Build
+
+on:
+  push:
+    branches:
+      - main # Change to your default branch if different
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: setup cross-compile environment.
+        run: |
+          sudo apt update -y
+          sudo apt install -y gcc-multilib
+          sudo apt install -y gcc-i686-linux-gnu
+          sudo apt install -y binutils-i686-linux-gnu
+          sudo apt install -y nasm
+          mkdir $HOME/opt/cross/
+          sudo ln -s /usr/bin/i686-linux-gnu-gcc $HOME/opt/cross/i686-elf-gcc
+          sudo ln -s /usr/bin/i686-linux-gnu-ld $HOME/opt/cross/i686-elf-ld
+      - name: build.
+        run: |
+          make clean
+          make -j$(nproc) all
