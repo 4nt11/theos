@@ -10,4 +10,8 @@ make clean
 #	echo "failed to build."
 #fi
 
-make -j$(nproc) all
+if [[ "$1" == "github" ]]; then
+	make -j $(nproc) github 
+else
+	make -j$(nproc) all
+fi
