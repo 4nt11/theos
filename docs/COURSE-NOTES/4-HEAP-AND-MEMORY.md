@@ -836,8 +836,7 @@ enable_paging:
 - `        mov cr0, eax`: here we move `eax` into the `cr0` register.
 - `        pop ebp`: here we delete our stack.
 - `        ret`: and we return!
-
-### `paging.h`
+### 3.2.2. `paging.h`
 Before getting our hands dirty with some C code, we need to check the constants and structures created within our header file.
 ```
 #define PAGING_CACHE_DISABLED   0b00010000
@@ -860,20 +859,124 @@ void paging_switch(uint32_t* directory);
 void enable_paging();
 ```
 
-- `#define PAGING_CACHE_DISABLED   0b00010000`: bitmask.
-- `#define PAGING_WRITE_THROUGH    0b00001000`: bitmask.
-- `#define PAGING_ACCESS_FROM_ALL  0b00000100`: bitmask.
-- `#define PAGING_IS_WRITEABLE     0b00000010`: bitmask.
-- `#define PAGING_IS_PRESENT       0b00000001`: bitmask.
-- `#define PAGING_TOTAL_ENTRIES_PER_TABLE 1024`:
-- `#define PAGING_PAGE_SIZE 4096`:
-- `struct paging_4gb_chunk`:
-- `        uint32_t* directory_entry;`:
-- `uint32_t* paging_4gb_chunk_get_directory(struct paging_4gb_chunk* chunk);`:
-- `struct paging_4gb_chunk* paging_new_4gb(uint8_t flags);`:
-- `void paging_switch(uint32_t* directory);`:
-- `void enable_paging();`:
+- `#define PAGING_CACHE_DISABLED   0b00010000`: bitmask. it represents the PCD 'cache disable' bit.
+- `#define PAGING_WRITE_THROUGH    0b00001000`: bitmask. it represents the PWT 'write through' bit.
+- `#define PAGING_ACCESS_FROM_ALL  0b00000100`: bitmask. it represents the U/S 'user/supervisor' bit.
+- `#define PAGING_IS_WRITEABLE     0b00000010`: bitmask. it represents the R/W 'read/write' bit.
+- `#define PAGING_IS_PRESENT       0b00000001`: bitmask. it represents the P 'present' bit.
+- `#define PAGING_TOTAL_ENTRIES_PER_TABLE 1024`: we define 1024 entries per page table.
+- `#define PAGING_PAGE_SIZE 4096`: and each page table contains 4096 pages.
+- `struct paging_4gb_chunk`: this is our page table.
+- `        uint32_t* directory_entry;`: and this is our directory entries or page directories.
+- `uint32_t* paging_4gb_chunk_get_directory(struct paging_4gb_chunk* chunk);`: this is a helper function that will allow us to access page directories.
+- `struct paging_4gb_chunk* paging_new_4gb(uint8_t flags);`: this function will allow us to create a page and its directories.
+- `void paging_switch(uint32_t* directory);`: and this function linearly assigns a physical address to a page address or virtual address.
+- `void enable_paging();`: and here we call our Assembly `enable_paging` label.
 
-- describe paging.h, paging.c,
-- describe changes to kernel.c
-- describe changes to Makefile
+All the bitmasks are attributes that are assigned to the page directory. These are well documented in the paging notes and in the OsDev wiki, so I won't go through them here.
+### 3.2.3. `paging.c`
+Now let's get our hands dirty. It's not that much code in comparison to the heap implementation, but it gets a bit confusing. Nevertheless, we'll go over it step by step.
+#### 3.2.3.1. `struct paging_4gb_chunk paging_new_4gb(uint8_t flags)`
+```
+void paging_load_directory(uint32_t* directory);
+static uint32_t* current_directory = 0;
+
+struct paging_4gb_chunk* paging_new_4gb(uint8_t flags)
+{
+        uint32_t* directory = kzalloc(sizeof(uint32_t) * PAGING_TOTAL_ENTRIES_PER_TABLE);
+        int offset = 0;
+        for (int i = 0; i < PAGING_TOTAL_ENTRIES_PER_TABLE; i++)
+        {
+                uint32_t* entry = kzalloc(sizeof(uint32_t) * PAGING_TOTAL_ENTRIES_PER_TABLE);
+                for (int b = 0; b < PAGING_TOTAL_ENTRIES_PER_TABLE; b++)
+                {
+                        entry[b] = (offset + (b * PAGING_PAGE_SIZE)) | flags;
+                }
+                offset += (PAGING_TOTAL_ENTRIES_PER_TABLE * PAGING_PAGE_SIZE);
+                directory[i] = (uint32_t) entry | flags | PAGING_IS_WRITEABLE;
+        }
+        struct paging_4gb_chunk* chunk_4gb = kzalloc(sizeof(struct paging_4gb_chunk));
+        chunk_4gb -> directory_entry = directory;
+
+        return chunk_4gb;
+}
+```
+
+- `void paging_load_directory(uint32_t* directory);`: Here we make an explicit definition of the `paging_load_directory` label that we created in the `paging.asm` file. Remember, this function loads the paging directory into the `cr3` register.
+- `static uint32_t* current_directory = 0;`: Here we create a global static variable because we want to be able to access this variable outside of the scope of the function that we'll see in just a bit. This is because we'll use it later on too.
+- `struct paging_4gb_chunk* paging_new_4gb(uint8_t flags)`: simple function definition. it'll take a single byte which will represent the flags of the page directory. those bitmasks we saw before? yeah, we'll use them in this function.
+- `        uint32_t* directory = kzalloc(sizeof(uint32_t) * PAGING_TOTAL_ENTRIES_PER_TABLE);`: Here we multiply `uint32_t` (at least 32 bits) with `PAGING_TOTAL_ENTRIES_PER_TABLE`. the result will represent the size of our `directory` allocation using the function we just created `kzalloc`, which will fill a buffer of size `(sizeof(uint32_t) \* PAGING_TOTAL_ENTRIES_PER_TABLE)`and then zero it out.\*
+	- we zero it out because if any memory pointer returned by the `kzalloc` function has any bits set, it could mess up our page directory.
+	- we allocate `(sizeof(uint32_t) * PAGING_TOTAL_ENTRIES_PER_TABLE)` because the result will be 4096 or `PAGING_PAGE_SIZE`.
+- `        int offset = 0;`: here we initialize an offset. this variable is used to keep track of the memory region that is being mapped.
+- `        for (int i = 0; i < PAGING_TOTAL_ENTRIES_PER_TABLE; i++)`: here we start a for loop that will populate our `directory` with it's attributes and flags.
+- `                uint32_t* entry = kzalloc(sizeof(uint32_t) * PAGING_TOTAL_ENTRIES_PER_TABLE);`: we'll use entry for the page entries.
+- `                for (int b = 0; b < PAGING_TOTAL_ENTRIES_PER_TABLE; b++)`: here we start another for loop to assign the flags to the `entry` variable for our page directory.
+- `                        entry[b] = (offset + (b * PAGING_PAGE_SIZE)) | flags;`: now we assign the attributes at the given offset. Ait might seem confusing, but remember: each directory has entries. each entry points to a page table, which is also an array of 1024 entries. if this explaination in not enough, check the misc notes on Paging.
+- `                offset += (PAGING_TOTAL_ENTRIES_PER_TABLE * PAGING_PAGE_SIZE);`: Here we increment the `offset` to start populating the next four megabytes of memory.
+- `                directory[i] = (uint32_t) entry | flags | PAGING_IS_WRITEABLE;`: And here we set the Page Directory attributes using `OR` bitwise operations. 
+- `        struct paging_4gb_chunk* chunk_4gb = kzalloc(sizeof(struct paging_4gb_chunk));`: Here we finally initialize the chunk of memory that we'll return and initialize it to the size of `paging_4gb_chunk` which is, indeed, four gigabytes.
+- `        chunk_4gb -> directory_entry = directory;`: And here we assign the PD to the newly created `chunk_4gb` chunk.
+- `        return chunk_4gb;`: And we return it.
+*\* I have no idea why the instructor didn't use the PAGING_PAGE_SIZE instead. The result is the same. I'll be in touch with him and check why he chose that way of calculating the kzalloc size.*
+This is the most complex function of the `paging.c` section. Read it several times until you understand it. Use the Paging notes on the misc section.
+
+#### 3.2.3.2. `void paging_switch(uint32_t* directory)`
+This function will be used to load the Page Directory to the CPU register `cr3` and set the `current_directory` variable that we assigned before to the current Page Directory created with `paging_new_4gb_chunk`.
+```
+void paging_switch(uint32_t* directory)
+{
+        paging_load_directory(directory);
+        current_directory = directory;
+}
+```
+- `void paging_switch(uint32_t* directory)`: function definition. we'll expect the 4 gigabyte chunk of memory.
+- `        paging_load_directory(directory);`: here we load the chunk into the CPU `cr3` register.
+- `        current_directory = directory;`: and here we set the global variable `current_directory` to the generated chunk by `paging_new_4gb_chunk`.
+#### 3.2.3.3. `uint32_t* paging_4gb_chunk_get_directory(struct paging_4gb_chunk* chunk)`
+This function will be used in the future. It's a way to access the Page Directory directly. We do NOT want to make this accessible outside of the `paging.c` scope, as it could allow a malicious person to access the real physical memory.
+```
+uint32_t* paging_4gb_chunk_get_directory(struct paging_4gb_chunk* chunk)
+{
+        return chunk->directory_entry;
+}
+```
+- `uint32_t* paging_4gb_chunk_get_directory(struct paging_4gb_chunk* chunk)`: here we receive the chunk of memory generated previously.
+- `        return chunk->directory_entry;`: and here we return the `directory_entry`.
+And that's it for the paging implementation. We have to make some changes to `kernel.c` and the `Makefile`, but that's just calling other functions. Let's see it.
+
+### 3.2.4. `kernel.c`
+In `kernel.c`, we make the calls to some functions that we've implemented.
+```
+static struct paging_4gb_chunk* kernel_chunk = 0;
+void kernel_main()
+	...
+        // setting up the pages
+        kernel_chunk = paging_new_4gb(PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
+        // switching pages
+        paging_switch(paging_4gb_chunk_get_directory(kernel_chunk));
+        // enabling paging
+        enable_paging();
+```
+- `static struct paging_4gb_chunk* kernel_chunk = 0;`: here we make our page directory and page table a global variable so it can be accessed by other functions.
+	- `kernel_chunk = paging_new_4gb(PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);`: here we generate the page directory and page table with the writeable, present and U/S flags.
+	- `paging_switch(paging_4gb_chunk_get_directory(kernel_chunk));`: here we tell the CPU to load the `kernel_chunk` chunk into the `cr3` register.
+	- `enable_paging();`: and here we enable paging. it's **important** to FIRST load the PD and PT and ***then*** enable paging. if we don't, the system ***WILL PANIC!***.
+And that's all for the `kernel.c` file changes.
+
+### 3.2.5. `Makefile`
+`Makefile` changes are pretty basic. We're just telling it to compile and link the `paging.o` and `paging.asm.o` objects to the kernel.
+```
+FILES = ... ./build/memory/paging/paging.o \
+	./build/memory/paging/paging.asm.o
+	
+./build/memory/paging/paging.o: ./src/memory/paging/paging.c
+        i686-elf-gcc $(INCLUDES) -I./src/memory/paging/ $(FLAGS) -std=gnu99 -c ./src/memory/paging/paging.c -o ./build/memory/paging/paging.o
+
+./build/memory/paging/paging.asm.o: ./src/memory/paging/paging.asm
+        nasm -f elf -g ./src/memory/paging/paging.asm -o ./build/memory/paging/paging.asm.o
+```
+We add the files that we expect to be there to `make all` and then just compile them! It's the same process we've done tons of times before.
+
+# 4. Modifying the Page Table.
+TODO!
