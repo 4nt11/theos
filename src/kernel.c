@@ -89,5 +89,6 @@ void kernel_main()
 	enable_interrupts();
 	// initialize the interrupt descriptor table.
 	idt_init();
+	print("hola");
 
 }
