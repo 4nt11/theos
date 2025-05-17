@@ -2,7 +2,7 @@
 #include "heap.h"
 #include "config.h"
 #include "kernel.h"
-#include "status.h"
+#include "debug/debug.h"
 #include "memory/memory.h"
 
 struct heap kernel_heap;
@@ -42,3 +42,10 @@ void kfree(void* ptr)
 {
 	heap_free(&kernel_heap, ptr);
 }
+
+void kzfree(void* ptr)
+{
+	void* n_ptr = ptr;
+	kassert((int)(memset(n_ptr, 0, sizeof(ptr))));
+}
+

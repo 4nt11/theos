@@ -1,6 +1,6 @@
 FILES = ./build/kernel.asm.o ./build/kernel.o ./build/idt/idt.asm.o ./build/idt/idt.o ./build/memory/memory.o \
 	./build/io/io.asm.o ./build/memory/heap/heap.o ./build/memory/heap/kheap.o ./build/memory/paging/paging.o \
-	./build/memory/paging/paging.asm.o
+	./build/memory/paging/paging.asm.o ./build/debug/debug.o
 
 github: FLAGS += -fno-pie
 INCLUDES= -I./src
@@ -48,6 +48,9 @@ all: ./bin/kernel.bin ./bin/boot.bin
 
 ./build/memory/paging/paging.asm.o: ./src/memory/paging/paging.asm
 	nasm -f elf -g ./src/memory/paging/paging.asm -o ./build/memory/paging/paging.asm.o
+
+./build/debug/debug.o: ./src/debug/debug.c
+	i686-elf-gcc $(INCLUDES) -I./src/debug/ $(FLAGS) -std=gnu99 -c ./src/debug/debug.c -o ./build/debug/debug.o
 
 github: ./bin/kernel.bin ./bin/boot.bin
 	rm -rf ./bin/os.bin
