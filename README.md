@@ -38,7 +38,7 @@ qemu-system-i386 -hda build/os.bin
 ## how to contact me
 if you have any doubts about the code or you don't understand a concept, feel free to contact me.
 - [linkedin](https://www.linkedin.com/in/4nt1/)
-- [email](mailto:4n1t@resacachile.cl)
+- [email](mailto:4nt1@resacachile.cl)
 - [telegram](https://t.me/clp_c)
 - [mastodon](https://lile.cl/@4nt1)
 
