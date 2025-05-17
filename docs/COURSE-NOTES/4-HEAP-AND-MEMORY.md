@@ -980,7 +980,7 @@ We add the files that we expect to be there to `make all` and then just compile 
 
 Hey, it works!
 
-![../../media/paging_memcpy.png]
+![working implementation of paging, memcpy](https://github.com/4nt11/theos/blob/main/media/paging_memcpy.png)
 
 This is an image of the functional paging initialization, kzalloc and an implementation of memcpy (outside of the scope of the chapter; will document!). ain't that nice!
 
