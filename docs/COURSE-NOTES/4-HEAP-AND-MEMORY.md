@@ -978,5 +978,11 @@ FILES = ... ./build/memory/paging/paging.o \
 ```
 We add the files that we expect to be there to `make all` and then just compile them! It's the same process we've done tons of times before.
 
+Hey, it works!
+
+![../../media/paging_memcpy.png]
+
+This is an image of the functional paging initialization, kzalloc and an implementation of memcpy (outside of the scope of the chapter; will document!). ain't that nice!
+
 # 4. Modifying the Page Table.
 TODO!
