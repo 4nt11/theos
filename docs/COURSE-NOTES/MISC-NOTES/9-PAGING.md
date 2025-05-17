@@ -70,4 +70,54 @@ Taking into consideration we have two `for` loops that will stop at `PAGING_TOTA
 We consider `PAGING_PAGE_SIZE` because remember: each entry in the Page Table is 4 kilobytes, and `PAGING_PAGE_SIZE` is 4096, or four kilobytes. So, with that in mind, we know that we'll indeed populate 4 gigabytes of memory.
 # Four gigabytes of memory?!
 Yes. `PAGING_TOTAL_ENTRIES_PER_TABLE * PAGING_TOTAL_ENTRIES_PER_TABLE * PAGING_PAGE_SIZE` or `1024 * 1024 * 4096` equals 4.294.967.296, or four gigabytes :)
+# Switching and modifying the PD and PT.
+To be able to switch and move around the pages, we need a function that takes the virtual address and calculates the PD and PT from it. For that, we use the following formulas:
 
+directory_index = `aligned_virtual_address / (PAGING_TOTAL_ENTRIES_PER_TABLE * PAGING_PAGE_SIZE)`
+table_index = `aligned_virtual_address % (PAGING_TOTAL_ENTRIES_PER_TABLE * PAGING_PAGE_SIZE) / PAGING_PAGE_SIZE)`
+
+With `aligned_virtual_address` I'm referring to a virtual address whose modulus by `PAGING_PAGE_SIZE` is equal to zero. That is, `virtual_addr % PAGING_PAGE_SIZE = 0`. If this virtual address isn't aligned, then it's not a valid argument and we cannot get a precise calculation of the PD index or PT index.
+
+let's use them in a few examples. let's start by calculating the PD index.
+virtual_address = `0x405000`
+pd_index = `0x405000 / (1024 * 4096)`
+pd_index = `4,214,784 / (1024 * 4096)`
+pd_index = `4,214,784 / (4,194,304)`
+pd_index = `1`
+
+let's try the same formula with another virtual address. `0x504000`
+pd_index = `0x504000 / (1024*4096)`
+pd_index = `5,259,264 / (1024 * 4096)`
+pd_index = `5,259,264 / 4,194,304`
+pd_index = `1`
+*\*Note: we aren't using floating numbers. Just natural numbers.*
+
+nice! now let's go for a PT index. let's use the previous virtual address `0x405000`
+pt_index = `0x405000 % (1024 * 4096) / 4096`
+pt_index = `4,214,784 % (1024 * 4096) / 4096`
+pt_index = `4,214,784 % (4,194,304) / 4096`
+pt_index = `20,480 / 4096`
+pt_index = `5`
+
+let's do the same as before and now try the formula with the value `0x504000`.
+pt_index = `0x504000 % (1024*4096) / 4096`
+pt_index = `5,259,264 % (4,194,304) / 4096`
+pt_index = `5,259,264 % 4,194,304 / 4096`
+pt_index = `1,064,960 / 4096`
+pt_index = `260`
+
+and done! I hope this few examples help everyone reading this page to better understand the calculations in our code.
+# (uint32_t)(entry & 0xFFFFF000)???
+This is an `AND` bitwise operation in which we'll access the first 20 bits of the entry page table entry. Let's visualize it.
+`entry` is a 32 bit value, so:
+`1111 1111 1111 1111 1111 1111 0011 0110`. This is just an example, the actual entry won't look like this. 
+`0xFFFFF000` would look like this:
+`1111 1111 1111 1111 1111 1111 0000 0000`. So, when we do the `AND` operation, which expects both bits to be `0` or `1`:
+
+```
+1111 1111 1111 1111 1111 1111 0011 0110 &
+1111 1111 1111 1111 1111 1111 0000 0000
+=
+1111 1111 1111 1111 1111 1111 0000 0000
+```
+And so, `entry & 0xFFFFF000` would be `1111 1111 1111 1111 1111 1111 0000 0000`. Pretty neat!

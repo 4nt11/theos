@@ -985,4 +985,117 @@ Hey, it works!
 This is an image of the functional paging initialization, kzalloc and an implementation of memcpy (outside of the scope of the chapter; will document!). ain't that nice!
 
 # 4. Modifying the Page Table.
-TODO!
+Now we'll see how we can modify the page table from the page directory to be able to remap virtual addresses to physical addresses.
+## 4.1. `paging.c`
+we've worked in this file before, so we'll jump right into the changes and new functions we've made.
+### 4.1.1. `bool paging_is_aligned(void* addr)`
+This function will help us validate whether the `addr` passed on to us is aligned (check Paging notes for what *aligned* means) and return a boolean value.
+```
+bool paging_is_aligned(void* addr)
+{
+        return ((uint32_t)addr % PAGING_PAGE_SIZE) == 0;
+}
+```
+- `bool paging_is_aligned(void* addr)`: function definition. we'll take a pointer to an addr.
+- `        return ((uint32_t)addr % PAGING_PAGE_SIZE) == 0;`: and here we use the modulus operand to check if the page is aligned or not.
+### 4.1.2. `int paging_get_indexes(void* virtual_address, uint32_t* directory_index_out, uint32_t* table_index_out)`
+this function will help us get the actual indexes from a virtual address and put the values in the pointers passed onto the function.
+```
+int paging_get_indexes(void* virtual_address, uint32_t* directory_index_out, uint32_t* table_index_out)
+{
+        int res = 0;
+        if (!paging_is_aligned(virtual_address))
+        {
+                res = -EINVARG;
+                goto out;
+        }
+        *directory_index_out = ((uint32_t)virtual_address / (PAGING_TOTAL_ENTRIES_PER_TABLE * PAGING_PAGE_SIZE));
+        *table_index_out = ((uint32_t) virtual_address % (PAGING_TOTAL_ENTRIES_PER_TABLE * PAGING_PAGE_SIZE) / PAGING_PAGE_SIZE);
+
+out:
+        return res;
+}
+```
+- `int paging_get_indexes(void* virtual_address, uint32_t* directory_index_out, uint32_t* table_index_out)`: here we take the virtual address from where we'll calculate both `directory` and `table` indexes from.
+- `        int res = 0;`: here we just initialize a return value. we've seen this before :)
+- `        if (!paging_is_aligned(virtual_address))`: if the virtual address passed onto the function isn't aligned...
+- `                res = -EINVARG;`: we return `-EINVARG` and...
+- `                goto out;`: go to the `out` label.
+- `        *directory_index_out = ((uint32_t)virtual_address / (PAGING_TOTAL_ENTRIES_PER_TABLE * PAGING_PAGE_SIZE));`: here we calcuate the directory index using this formula. it's further explained on the misc section about paging.
+- `        *table_index_out = ((uint32_t) virtual_address % (PAGING_TOTAL_ENTRIES_PER_TABLE * PAGING_PAGE_SIZE) / PAGING_PAGE_SIZE);`: here we calcuate the table index using this formula. it's further explained on the misc section about paging.
+- `out:`: just a label.
+- `        return res;`: and we return.
+### 4.1.3. `int paging_set(uint32_t* directory, void* virt, uint32_t phys_addr)`
+this function will be the one that we'll use to actually point the table index's virtual address to a physical address of our choosing.
+```
+int paging_set(uint32_t* directory, void* virt, uint32_t phys_addr)
+{
+        if(!paging_is_aligned(virt))
+        {
+                return -EINVARG;
+        }
+        uint32_t directory_index = 0;
+        uint32_t table_index = 0;
+
+        int res = paging_get_indexes(virt, &directory_index, &table_index);
+        if (res < 0)
+        {
+                return res;
+        }
+        uint32_t entry = directory[directory_index];
+        uint32_t* table = (uint32_t*)(entry & 0xfffff000); // take out the 20 bit address
+        table[table_index] = phys_addr;
+
+
+        return res;
+}
+```
+- `int paging_set(uint32_t* directory, void* virt, uint32_t phys_addr)`: function definition. we'll take a page directory, the virtual address and the physical address.
+- `        if(!paging_is_aligned(virt))`: here we check if the virtual address passed onto us is aligned. if not...
+- `                return -EINVARG;`: we return `-EINVARG`.
+- `        uint32_t directory_index = 0;`: here we initialize a variable which the `paging_get_indexes` will populate further on.
+- `        uint32_t table_index = 0;`: here we initialize a variable which the `paging_get_indexes` will populate further on.
+- `        int res = paging_get_indexes(virt, &directory_index, &table_index);`: here's where the previous two vars are populated with `directory` and `table` indexes.
+- `        if (res < 0)`: here we check if the `paging_get_indexes` failed or not.
+- `                return res;`: if it failed, then we fail too.
+- `        uint32_t entry = directory[directory_index];`: now we create a variabe that points to the given directory entry, which points to the page table and the attributes of the page table in a 32 bit value.
+- `        uint32_t* table = (uint32_t*)(entry & 0xfffff000);`: in this variable we'll access the first 20 bits of the entry, which is the pointer to the page table.
+- `        table[table_index] = phys_addr;`: and here, having the table and its index, we can asign the physical address directly.
+- `        return res;`: and done! we return `res`, which is the exit status of `paging_get_indexes`.
+and done! we now have a function that will swap around physical and virtual memory at our liking.
+## 4.2. `paging.h`
+in here we just expose the new functions for everyone to see :)
+```
+...
+int paging_set(uint32_t* directory, void* virt, uint32_t phys_addr);
+int paging_get_indexes(void* virtual_address, uint32_t* directory_index_out, uint32_t* table_index_out);
+bool paging_is_aligned(void* addr);
+```
+## 4.3. `kernel.c`
+no real changes were made to `kernel.c`, but we did add some code to exemplify the usage of the new functions.
+```
+...
+        char* ptr = kzalloc(4096);
+        paging_set(paging_4gb_chunk_get_directory(kernel_chunk), (void*)0x1000, (uint32_t)ptr | PAGING_ACCESS_FROM_ALL | PAGING_IS_PRESENT | PAGING_IS_WRITEABLE);
+
+        enable_paging();
+
+        char* ptr2 = (char*) 0x1000;
+        ptr2[0] = 'A';
+        ptr2[1] = 'B';
+        print(ptr2);
+        print(ptr);
+...
+```
+-         `char* ptr = kzalloc(4096);`: here we assign a pointer to a memory address returned by `kzalloc` ***before*** enabling paging.
+- `       paging_set(paging_4gb_chunk_get_directory(kernel_chunk), (void*)0x1000, (uint32_t)ptr | PAGING_ACCESS_FROM_ALL | PAGING_IS_PRESENT | PAGING_IS_WRITEABLE);`: here we make the swap between the `ptr` address `0x1000` and assign the page the attributes with `|` (`OR`) operations.
+- `       enable_paging();`: now we enable paging.
+- `       char* ptr2 = (char*) 0x1000;`: here we create a pointer to the virtual address `0x1000`, which, if paging is enabled, will now also point to `ptr`.
+- `       ptr2[0] = 'A';`: we assign `A` to `ptr2` for example purposes.
+- `       ptr2[1] = 'B';`: we assign `B` to `ptr2` for example purposes.
+- `       print(ptr2);`: we print `ptr2`; we can do this because `ptr` called `kzalloc`, so the string is null terminated
+- `       print(ptr);`: and we print `ptr`; same as above.
+
+This image will ilustrate pointer `kzalloc` allocation with and without paging enabled. As the picture shows, when we don't have paging enabled, `ptr2` is the only one being displayed, and in the right, we can see that both `ptr` and `ptr2` display `AB`. this is thanks to the magic of paging :)
+
+![paging vs no paging](https://github.com/4nt11/theos/blob/main/media/pagingvsnopaging.jpeg)

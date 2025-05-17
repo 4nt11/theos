@@ -77,24 +77,27 @@ static struct paging_4gb_chunk* kernel_chunk = 0;
 void kernel_main()
 {
 	// screen init stuff
-	print("[*] hello!\n");
 	terminal_initialize();
 	idt_init();
-	enable_interrupts();
+	print("[*] hello!\n");
 	print("[*] booting up...\n");
 
 	// memory related init
 	kheap_init();
 	kernel_chunk = paging_new_4gb(PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
 	paging_switch(paging_4gb_chunk_get_directory(kernel_chunk));
+	char* ptr = kzalloc(4096);
+
+	paging_set(paging_4gb_chunk_get_directory(kernel_chunk), (void*)0x1000, (uint32_t)ptr | PAGING_ACCESS_FROM_ALL | PAGING_IS_PRESENT | PAGING_IS_WRITEABLE);
+
 	enable_paging();
 
-	void* ptr = kzalloc(1000);
-	void* new_ptr = kzalloc(1000);
-	void* new_new_ptr = memcpy(ptr, new_ptr, 1000);
+	char* ptr2 = (char*) 0x1000;
+	ptr2[0] = 'A';
+	ptr2[1] = 'B';
+	print(ptr2);
+	print(ptr);
+	
+	enable_interrupts();
 
-	if(!new_new_ptr)
-	{
-		print("failed!");
-	}
 }
