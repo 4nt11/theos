@@ -4,6 +4,9 @@
 ## docs
 all the documentation is in the `docs/` directory.
 
+## contributing
+as of right now, i won't we taking code from outside. nevertheless, I do need people to help translate the documentation (without AI!). if you're interested, please, hit me up!
+
 ## building
 to build the project, you will need a cross compiler. if you don't know how to get one, please read [this](https://wiki.osdev.org/GCC_Cross-Compiler#Preparing_for_the_build). after that, be sure to change the environment variables found in the `build.sh` script to point to your binaries.
 
