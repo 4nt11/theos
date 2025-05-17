@@ -5,6 +5,8 @@
 #include "io/io.h"
 #include "memory/heap/kheap.h"
 #include "memory/paging/paging.h"
+#include "memory/memory.h"
+#include "debug/debug.h"
 
 uint16_t* video_mem = 0;
 uint16_t terminal_row = 0;
@@ -83,12 +85,12 @@ void kernel_main()
 	kernel_chunk = paging_new_4gb(PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
 	// switching pages
 	paging_switch(paging_4gb_chunk_get_directory(kernel_chunk));
-	// enabling paging
-	enable_paging();
 	// enable interrupts
 	enable_interrupts();
+	// enabling paging
+	enable_paging();
 	// initialize the interrupt descriptor table.
 	idt_init();
-	print("hola");
-
 }
+
+
