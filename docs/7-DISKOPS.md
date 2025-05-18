@@ -38,3 +38,37 @@ int disk_read_sector(int lba, int total, void* buffer)
         return 0;
 }
 ```
+## `void disk_search_and_init()`
+This function will initialize the `disk` struct and assign some types. It's in early alpha, since it doesn't really search for anything right now.
+```
+void disk_search_and_init()
+{
+        memset(&disk, 0, sizeof(disk));
+        disk.type = PEACHOS_DISK_TYPE_REAL;
+        disk.sector_size = PEACHOS_SECTOR_SIZE;
+}
+```
+## `struct disk* disk_get(int index)`
+This function will get you the disk from an index. Again, it in early alpha, since right now all it does is return the already existing `disk` structure as a pointer.
+```
+struct disk* disk_get(int index)
+{
+        if(index != 0)
+        {
+                return 0;
+        }
+        return &disk;
+}
+```
+## `int disk_read_block(struct disk* idisk, unsigned int lba, int total, void* buf)`
+This function will be the main way in which a programmer will read sectors from the disk. It requires a `disk` structure which is obtained by using `disk-get`, an `lba` starting sector, the `total` sectors to be read and a pointer to a `buf` in which the read data will be stored.
+```
+int disk_read_block(struct disk* idisk, unsigned int lba, int total, void* buf)
+{
+        if(idisk != &disk)
+        {
+                return -EIO;
+        }
+        return disk_read_sector(lba, total, buf);
+}
+```

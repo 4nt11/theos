@@ -22,4 +22,7 @@
 // table address
 #define PEACHOS_HEAP_TABLE_ADDRESS 	0x00007E00
 
+// disk sector size
+#define PEACHOS_SECTOR_SIZE 		512
+
 #endif

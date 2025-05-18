@@ -79,6 +79,7 @@ void kernel_main()
 {
 	// screen init stuff
 	terminal_initialize();
+	disk_search_and_init();
 	idt_init();
 	print("[*] hello!\n");
 	print("[*] booting up...\n");
@@ -88,12 +89,9 @@ void kernel_main()
 	kernel_chunk = paging_new_4gb(PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
 	paging_switch(paging_4gb_chunk_get_directory(kernel_chunk));
 	enable_paging();
-
 	char buf[512];
 
-	disk_read_sector(0, 1, buf);
-
-
+	disk_read_block(disk_get(0), 0, 3, &buf);
 
 	enable_interrupts();
 
