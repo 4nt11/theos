@@ -68,3 +68,97 @@ int disk_read_sector(int lba, int total, void* buffer)
 - `        return 0;`: and we return!
 
 If you didn't understand the code, I wholeheartedly recommed you reading on the `boot.asm` code again on the 3-PROTECTEDMODE page. It'll help you understand this code better.
+
+## 2.2 `disk.h`
+For now, we just publish the function in the header file.
+```
+#ifndef DISK_H
+#define DISK_H
+
+int disk_read_sector(int lba, int total, void* buffer);
+
+#endif 
+```
+# 3. Implementing a disk driver.
+Now, what we have already made will help us abstract more things. For example, we can give the programmer an interface to select a drive and read an amount of bytes from it. For now, we'll only have drive zero, but we'll fix that when the time is right.
+## 3.1. `disk.h`
+We've made some changes to the `disk.h` file. Mainly, we've created some constants and a struct to help us with our drives.
+```
+typedef unsigned int PEACHOS_DISK_TYPE;
+
+// real physical disk
+#define PEACHOS_DISK_TYPE_REAL 0
+
+struct disk
+{
+        PEACHOS_DISK_TYPE type;
+        int sector_size;
+};
+
+int disk_read_block(struct disk* idisk, unsigned int lba, int total, void* buf);
+struct disk* disk_get(int index);
+void disk_search_and_init();
+```
+- `typedef unsigned int PEACHOS_DISK_TYPE;`: here we create a type definition of `unsigned int` to a DISK_TYPE. it could be a drive, a partition, or something else.
+- `#define PEACHOS_DISK_TYPE_REAL 0`: here we define one of our disk types.
+- `struct disk`: here we'll create a disk structure that will help us create information and attributes to our disks. for now, it'll be quite simple.
+- `        PEACHOS_DISK_TYPE type;`: including its type and...
+- `        int sector_size;`: it's sector size.
+- `int disk_read_block(struct disk* idisk, unsigned int lba, int total, void* buf);`: function defintion. we'll see this later!
+- `struct disk* disk_get(int index);`: function defintion. we'll see this later!
+- `void disk_search_and_init();`: function defintion. we'll see this later!
+## 3.2. `disk.c`
+We've written three functions that will help us abstract the code and make our code more flexible. Let's go over them one by one.
+### 3.2.1. `void disk_search_and_init()`
+```
+struct disk disk;
+void disk_search_and_init()
+{
+        memset(&disk, 0, sizeof(disk));
+        disk.type = PEACHOS_DISK_TYPE_REAL;
+        disk.sector_size = PEACHOS_SECTOR_SIZE;
+}
+```
+- `struct disk disk;`: we create a structure in which we'll save our disk data.
+- `void disk_search_and_init()`: this function will initialize our disks and disk structures.
+- `        memset(&disk, 0, sizeof(disk));`: here we zero out the structure.
+- `        disk.type = PEACHOS_DISK_TYPE_REAL;`: here we assign a disk type of `PECHOS_DISK_TYPE_REAL`.
+- `        disk.sector_size = PEACHOS_SECTOR_SIZE;`: and here we assign the sector size. we haven't seen this constant definition, but know that it is 512.
+Pretty simple code! Let's continue.
+### 3.2.2. `struct disk* disk_get(int index)`
+```
+struct disk* disk_get(int index)
+{
+        if(index != 0)
+        {
+                return 0;
+        }
+        return &disk;
+}
+```
+- `struct disk* disk_get(int index)`: here we take a disk index. we're only working with disk ID 0, so it'll just return the disk for now.
+- `        if(index != 0)`: here we check if `index` is not zero.
+- `                return 0;`: if it's not zero, return 0 as any non zero index is invalid.
+- `        return &disk;`: and return a pointer to the disk.
+### 3.2.3. `int disk_read_block(struct disk* idisk, unsigned int lba, int total, void* buf)`
+```
+int disk_read_block(struct disk* idisk, unsigned int lba, int total, void* buf)
+{
+        if(idisk != &disk)
+        {
+                return -EIO;
+        }
+        return disk_read_sector(lba, total, buf);
+}
+```
+- `int disk_read_block(struct disk* idisk, unsigned int lba, int total, void* buf)`: this function will be the new way in which programmers will access the disks. it'll take a disk, an `lba` starting block, a `total` amount of sectors to read and a `buf` in which we'll store the data read.
+- `        if(idisk != &disk)`: here we check if the `idisk` is not the same as the disk we already have. this is for testing purposes and will be changed in the future.
+- `                return -EIO;`: if not &disk, then return `-EIO`
+- `        return disk_read_sector(lba, total, buf);`: and return the read sectors using the already available `disk_read_sector`.
+As you can see, we'll now use the `disk_read_block` function directly instead of calling the `disk_read_sector`. 
+## 3.3. `config.h`
+We've also defined some new constants in our `config.h` file.
+```
+#define PEACHOS_SECTOR_SIZE             512
+```
+It's just the sector size. That's it for now!
