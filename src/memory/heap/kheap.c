@@ -46,6 +46,6 @@ void kfree(void* ptr)
 void kzfree(void* ptr)
 {
 	void* n_ptr = ptr;
-	kassert((int)(memset(n_ptr, 0, sizeof(ptr))));
+	memset(n_ptr, 0, sizeof(ptr));
 }
 

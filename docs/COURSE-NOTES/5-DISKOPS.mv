@@ -1,0 +1,70 @@
+# 1. Preparing to read from the hard hisk.
+## 1.1. PCI IDE Controller
+- IDE refers to the electrical specification of cables which connect ATA drives to a device.
+- IDE allows up to four disks to be connected.
+- There are four types of disks:
+	- ATA (Serial): known as SATA; used by modern hard drives.
+	- ATA (Parallel): known as PATA; used by hard drives.
+	- ATAPI (Serial): Used by modern optical drives.
+	- ATAPI (Parallel): Commonly used by optical drives.
+- We don't care if the drive is serial or parallel.
+## 1.2. Possible IDE Drive Types
+- Primary Master Drive.
+- Primary Slave Drive.
+- Secondary Master Drive.
+- Secondary Slave Drive.
+
+We'll be using the I/O operations we've implemented in the past to be able to read the disk sectors.
+
+# 2. Reading from the disk with the ATA Controller.
+Let's see the implementation of the LBA driver we made in Assembly in our `boot.asm` file but in C.
+## 2.1. `disk.c`
+### 2.1.1. `int disk_read_sector(int lba, int total, void* buffer)`
+```
+int disk_read_sector(int lba, int total, void* buffer)
+{
+        outb(0x1F6, (lba >> 24) | 0xE0);
+        outb(0x1F2, total);
+        outb(0x1F3, (unsigned char)(lba & 0xff));
+        outb(0x1F4, (unsigned char) lba >> 8);
+        outb(0x1F4, (unsigned char) lba >> 16);
+        outb(0x1F7, 0x20);
+
+        unsigned short* ptr = (unsigned short*) buffer;
+
+        for (int b = 0; b < total; b++)
+        {
+                char c = insb(0x1F7);
+                while(!(c & 0x08))
+                {
+                        c = insb(0x1F7);
+                }
+                // copy from hdd to memory
+                for (int i = 0; i < 256; i++)
+                {
+                        *ptr = insw(0x1F0);
+                        ptr++;
+                }
+        }
+        return 0;
+}
+```
+- `int disk_read_sector(int lba, int total, void* buffer)`: function definition. this might look very familiar. check out the `load32` and `ata_lba_read` labels in the `boot.asm` file. here, we're taking an `lba` (disk sector) initial sector (from), a `total` of sectors to read (up to) and a `buffer` in which we'll store the bytes read.
+- `        outb(0x1F6, (lba >> 24) | 0xE0);`: here we right shuffle `lba` by 24 bits and `OR` it with `0xE0` and sending this data to the `0x1F6` I/O port.
+	- if you look at `boot.asm`, the lines 73 to 76 might be familiar. this is because we're doing exactly that but in C.
+- `        outb(0x1F2, total);`: here we send the total amount of sectors to read into the `0x1F2` I/O port.
+- `        outb(0x1F3, (unsigned char)(lba & 0xff));`: in here we're sending the lower 8 bits to the `0x1F3` port. check the LBA ATA misc notes for info on this bitwise operation.
+- `        outb(0x1F4, (unsigned char) lba >> 8);`: Here we send the `lba` right shifted by 8 to the `0x1F4` port.
+- `        outb(0x1F4, (unsigned char) lba >> 16);`: And here we send the `lba` right shifted by 16 to the `0x1F4` port.
+- `        outb(0x1F7, 0x20);`: And now we set the command port `0x1F7` to `0x20` or the read sector command.
+- `        unsigned short* ptr = (unsigned short*) buffer;`: here we make a pointer to the buffer passed onto us by the caller. we need to cast it to be able to assign stuff to it.
+- `        for (int b = 0; b < total; b++)`: here we start a loop. we'll read `total` amount of bytes into the `ptr` buffer pointer.
+- `                char c = insb(0x1F7);`: here we read from the `0x1F7` port. we're expecting for...
+- `                while(!(c & 0x08))`: bit 0x08. this bit is sent to us by the LBA drive and tells us that it's ready to send the data.
+- `                        c = insb(0x1F7);`: here we continue to read and check if the `0x08` bit is set.
+- `                for (int i = 0; i < 256; i++)`: if the `0x08` bit is set we go into the reading loop.
+- `                        *ptr = insw(0x1F0);`: here we read two bytes into the `*ptr`.
+- `                        ptr++;`: and we increment the pointer until `i` is higher than 256.
+- `        return 0;`: and we return!
+
+If you didn't understand the code, I wholeheartedly recommed you reading on the `boot.asm` code again on the 3-PROTECTEDMODE page. It'll help you understand this code better.
