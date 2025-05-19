@@ -162,3 +162,422 @@ We've also defined some new constants in our `config.h` file.
 #define PEACHOS_SECTOR_SIZE             512
 ```
 It's just the sector size. That's it for now!
+# 4. What's a filesystem?
+- A filesystem is a structure that describes information stored in a disk.
+- Disks do not have the concept of a file. They are not aware of them.
+- But the operating system does know about files and uses the filesystem to read and write to or from files.
+# 4.1. Disks and what we already know.
+- Disks are gigantic arrays of data that are split into several sectors.
+- Each sector in a disk is given an LBA (Logical Block Address) number.
+- But "files" don't exist in the disk in the sense that we know them. They exist as pure data.
+## 4.2. Filesystem Structure
+- A filesystem contains raw data for files.
+- It contains the filesystem structure header which can explani things such as how many files are no the disk, where the root directory is in relation to its sectors and more.
+- They way files are laid out on disk is different depending on the filesystem at hand. For example: a "file" will not be the same or have the same structure in FAT32 versus EXT4. They might contain different metadata, different structures and so on.
+- Without filesystems, we'd we working with sector numbers and we'd have to write down where our files are in each sector by hand. It'd be very painful, and that's why we do filesystems.
+- Operating systems must have a way to read and understand these filesystems. That's why when you format a USB drive to EXT4 format, many Windows versions will say that the disk is "corrupt" (even though it isn't), because it has no idea what an EXT4 filesystem is and thus can't read from it or understand what's going on in it.
+## 4.3. FAT16 (File Allocation Table); 16 bits.
+- The first sector in this filesystem format is the boot sector on a disk. Fields also exist in this first sector that describe the filesystem, such as how many reserved sectors follow this sector.
+- Then follows the reserved sectors (if any) amd these sectors are typically ignored by the filesystem. There's a field in the bootsector that tells the operating system to ignore them. This isn't automatic and we must make our OS ignore them manually.
+- Then we have our first file allocation table. This table contains the values that represents which clusters on the disk are taken and which ones are free for use. A cluster is just a certain number of sectors joined together to represent a cluster.
+- There might be a second file allocation table, although this one it's optional and depends on whether the FAT6 header in the boot sector is set or not.
+- Then would come the root directory. This directory explains what files/directories are in the root directory of the filesystem. Each entry has a relative name that represents the file or directory name, attributes such as read or write permissions, address of the first cluster representing the data on the disk and more.
+- And then we have the data region. Our data is here! :)
+# 5. Creating a path parser.
+A path parser function will divide something like `/mnt/file.txt` into `drive, path, file`. Although it sounds simple (and it is), at first it looks and feels like very complex operations. With time, we'll realize that indeed, these are very simple and logical operations. Before getting into the parser itself, we'll move around some functions and create other ones that'll help us write the parser. Let's do it!
+## 5.1. `string.h`
+We've created some new code to be able to validate some stuff, like if a given `char` is a number, convert an ASCII number into an number of `int` type (because 1 is not the same as '1') and a couple more. I've also moved the `memcpy` function we saw before in here.
+```
+#ifndef STRING_H
+#define STRING_H
+#include <stddef.h>
+#include <stdbool.h>
+
+int strlen(const char* ptr);
+void* memcpy(void* src, void *dst, size_t size);
+bool isdigit(char c);
+int tonumericdigit(char c);
+int strnlen(const char* ptr, int max);
+
+#endif
+```
+- `int strlen(const char* ptr);`: although we've already made a `strlen` function, we'll move it in here, as to keep everything well organized.
+- `void* memcpy(void* src, void *dst, size_t size);`: and this `memcpy` function previously was in the `memory` section, but i've moved it here, since it makes more sense.
+- `bool isdigit(char c);`: this function will help us check is a `char` is a digit or not.
+- `int tonumericdigit(char c);`: this function will help us convert an ASCII digit into an actual number.
+- `int strnlen(const char* ptr, int max);`: this function will do a comparison between the lenght of `ptr` and `max`, and it will return different values if `ptr` is higher or lower than `max`.
+## 5.2. `string.c`
+Now, let's go over the actual code.
+### 5.2.1. `int strlen(const char* ptr);`
+```
+int strlen(const char* ptr)
+{
+        int len = 0;
+        while(*ptr != 0)
+        {
+                len++;
+                ptr += 1;
+        }
+        return len;
+}
+```
+- `int strlen(const char* ptr)`: function definition. we'll take a `const char* ptr`.
+- `        int len = 0;`: here we declare an initial `len` variable which we'll represent the lenght of the `ptr` passed on to us.
+- `        while(*ptr != 0)`: here we check if `*ptr` is NULL terminated or the end of the pointer.
+- `                len++;`: if not, we increment the lenght.
+- `                ptr += 1;`: and we also increment the pointer position.
+- `        return len;`: and we return the lenght.
+### 5.2.2. `void* memcpy(void* src, void *dst, size_t size);`
+We won't go over the `memcpy` code, as it has not changed. I just moved it here.
+### 5.2.3. `bool isdigit(char c);`
+```
+bool isdigit(char c)
+{
+        return c >= 48 && c <= 57;
+}
+```
+- `bool isdigit(char c)`: here we make a function that will take a `char c`. we will check its ASCII value and determine if it is between 48 and 57, which are integer numbers (check the ASCII table).
+- `        return c >= 48 && c <= 57;`: here we do a conditional return and check if `c` is higher or equal to 48 (which is a numeric `0`) and if it is lower or equal to 57 (which is numeric `9`). if true, we return true, if not, we return false (1=true, 0=false).
+### 5.2.4. `int tonumericdigit(char c);`
+```
+int tonumericdigit(char c)
+{
+        return c - 48;
+}
+```
+- `int tonumericdigit(char c)`: function definition. we'll take a `char c` that is supposed to be an ASCII digit.
+- `        return c - 48;`: here we make a conversion from ASCII digits to decimal digits. take ASCII value 50, which is `2`. 50-48 would equal to 2, which is, well, integer 2. in the ASCII table, `2` is `start of text`, but that doesn't matter to us, because we want the raw decimal value.
+### 5.2.5. `int strnlen(const char* ptr, int max);`
+```
+int strnlen(const char* ptr, int max)
+{
+        int len = 0;
+        for(int i = 0; i < max; i++)
+        {
+                if(ptr[i] == 0)
+                {
+                        break;
+                }
+        }
+        return len;
+}
+```
+- `int strnlen(const char* ptr, int max)`: as described before, we'll take a `ptr` and a `max` value and we'll use is to count and read a `max` amount of characters from `ptr` and return the `len`.
+- `        int i = 0;`: here we initialize `i` as integer to `0`.
+- `        for(i = 0; i < max; i++)`: here we start to go over the `ptr` items with `i`.
+- `                if(ptr[i] == 0)`: we check if `ptr[i]` is `0` (NULL terminator), and if so...
+- `                        break;`: break. if not, keep counting and increment `i`.
+- `        return len;`: and return `len`:
+This is all very simple. Because this, although it will help us make the path parser, isn't the path parser itself :) Let's go over the changes made to `memory.c` before getting our hands ***really*** dirty.
+## 5.3. `memory.h`
+We've added a prototype for `memcmp` and deleted some stuff that should've never been there, like `kzmalloc` and `memcpy`.
+```
+...
+int memcmp(void* s1, void* s2, int count);
+...
+```
+We'll go over `memcmp` right now.
+## 5.4. `memory.c`
+### 5.4.1. `int memcmp(void* s1, void* s2, int count)`
+```
+int memcmp(void* s1, void* s2, int count)
+{
+        char* c1 = s1;
+        char* c2 = s2;
+
+        while(count-- > 0)
+        {
+                if (*c1++ != *c2++)
+                {
+                        return c1[-1] < c2[-1] ? -1 : 1;
+                }
+        }
+        return 0;
+}
+```
+- `int memcmp(void* s1, void* s2, int count)`: function definition. we'll take two pointers and a `count` of bytes to check.
+- `        char* c1 = s1;`: here we make a pointer to the provided pointer.
+- `        char* c2 = s2;`: here we make a pointer to the provided pointer.
+- `        while(count-- > 0)`: here we make a while `count` minus one is higher than zero. `count` will be decremented every time the loop begins again.
+- `                if (*c1++ != *c2++)`: here we check if `c1++` and `c2++` are not equal. this increments `*c1` and `*c2` every time the `while` loop runs.
+- `                        return c1[-1] < c2[-1] ? -1 : 1;`: and here we make some tertiary operations. if the value of `c1[-1]` is lower than `c2[-1]`, then we return -1, but we return 1 if it's the other way around.
+- `        return 0;`: and we return 0 if the comparison is OK!
+For a while I wasn't able to understand that what that tertiary operation was doing. But after a couple minutes of reading, I understand.
+## 5.5. `pparser.h`
+Now we're getting into the interesting stuff. Before reading this section, I recommend reading about [linked lists](https://www.learn-c.org/en/Linked_lists). It's a fundamental data structure and you will need to understand how they work before getting into the section. Nevertheless, you can also read the path parsing notes in the misc section. Let's continue. As always, we won't go over the header guard.
+```
+struct path_root
+{
+        int drive_no;
+        struct path_part* first;
+};
+
+struct path_part
+{
+        const char* part;
+        struct path_part* next;
+};
+
+void pathparser_free(struct path_root* root);
+struct path_root* pathparser_parse(const char* path, const char* current_directory_path);
+```
+- `struct path_root`: we create a `path_root`. this will be the root of our filesystem.
+- `        int drive_no;`: the `root` also contains data on the drive number.
+- `        struct path_part* first;`: and then it links to a `path_part*` struture `first`, which would be files and directories right after `/`. in UNIX, it could be `bin, home, usr`, etc.
+- `struct path_part`: here we define the structure for everything else that is not the root.
+- `        const char* part;`: here we establish the identifier for that part of the path. it could be, for example, `bin`.
+- `        struct path_part* next;`: and here we establish a link to the `next` item within that directory, which is the same type as the one we're defining right now.
+- `void pathparser_free(struct path_root* root);`: here we set a `pathparser_free` function, but we'll see it later.
+- `struct path_root* pathparser_parse(const char* path, const char* current_directory_path);`: same here. we'll see it later on.
+## 5.6. `pparser.c`
+Now we're getting into the MEAT and POTATOES! Let's go!
+
+### 5.6.1. `static int pathparser_get_drive_by_path(const char** path)`
+this function will get the drive number by using the `path` passed onto it.
+```
+static int pathparser_get_drive_by_path(const char** path)
+{
+        if(!pathparser_path_valid_format(*path))
+        {
+                return -EBADPATH;
+        }
+        int drive_no = tonumericdigit(*path[0]);
+
+        // add 3 bytes to skip drive number
+        *path += 3;
+        return drive_no;
+}
+```
+- `static int pathparser_get_drive_by_path(const char** path)`: here we'll take a pointer to a `char` pointer, or a pointer to a string. the `static` means that the function won't be changing any values passed onto it.
+- `        if(!pathparser_path_valid_format(*path))`: here we check if the passed value is a valid format. we'll check this function next.
+- `                return -EBADPATH;`: if not, return `-EBADPATH` or -4. we'll see this at the end.
+- `        int drive_no = tonumericdigit(*path[0]);`: here we convert the first element of the char array into a numeric digit from an ASCII digit into a decimal digit.
+- `        *path += 3;`: here we increment the pointer passed by the user by 3.
+- `        return drive_no;`: and we return the `drive_no`.
+The `path` in this case is something like `0:/bin/bash`. When we do `*path += 3`, we are effectively moving the pointer past the `0:/` section of the path. This isn't changing the pointer, it's just incrementing it, as the data contained has not been changed.
+### 5.6.2. `static int pathparser_path_valid_format(const char* filename)`
+This function will validate the path format.
+```
+static int pathparser_path_valid_format(const char* filename)
+{
+        int len = strnlen(filename, PEACHOS_MAX_PATH);
+        return (len >= 3 && isdigit(filename[0]) && memcmp((void*)&filename[1], ":/", 2) == 0);
+}
+```
+- `static int pathparser_path_valid_format(const char* filename)`: here we take a `*filename`, effectively a path. we won't be changing the values passed onto us.
+- `        int len = strnlen(filename, PEACHOS_MAX_PATH);`: here we first check if the `len` of `filename` is higher than the maximum path size, which is 108. we'll see this change at the end.
+- `        return (len >= 3 && isdigit(filename[0]) && memcmp((void*)&filename[1], ":/", 2) == 0);`: here we make a wacky conditional return. we first check if `len` is higher or equal to 3, we then check if the first character is a digit and then we make a `memcmp` between the second and third item in the `filename` array with `:/`. if all of these conditions are met, the path is valid and we return zero.
+### 5.6.3. `static struct path_root* path_parser_create_root(int drive_number)`
+This function will setup the root path structure.
+```
+static struct path_root* path_parser_create_root(int drive_number)
+{
+        struct path_root* path_r = kzalloc(sizeof(struct path_root));
+        path_r->drive_no = drive_number;
+        path_r->first = 0;
+        return path_r;
+}
+```
+- `static struct path_root* path_parser_create_root(int drive_number)`: here we take the drive number as an argument.
+- `        struct path_root* path_r = kzalloc(sizeof(struct path_root));`: now we create a `path_root` structure and we kzalloc
+- `        path_r->drive_no = drive_number;`: here we access the member `drive_no` of the pointer to the pointer that points to the `path_root` structure and set the `drive_no` item to `drive_number`.
+- `        path_r->first = 0;`: here we do the same as above. `0` in this case represents the first section of our path, which is `0`, like in `0:/bin/bash`.
+- `        return path_r;`: and here we return the pointer to the pointer to the struct.
+### 5.6.4. `struct path_part* pathparser_parse_path_part(struct path_part* last_part, const char** path)`
+This function will parse the path part from the `last_part` using the `path`.
+```
+struct path_part* pathparser_parse_path_part(struct path_part* last_part, const char** path)
+{
+        const char* path_part_str = pathparser_get_path_part(path);
+        if (!path_part_str)
+        {
+                return 0;
+        }
+
+        struct path_part* part = kzalloc(sizeof(struct path_part));
+        part->part = path_part_str;
+        part->next = 0x00;
+
+        if (last_part)
+        {
+                last_part->next = part;
+        }
+
+        return part;
+}
+```
+- `struct path_part* pathparser_parse_path_part(struct path_part* last_part, const char** path)`: function definition. we'll use this function to parse the path parts that are passed to us by `last_part` and the pointer to the char pointer `path` itself.
+- `        const char* path_part_str = pathparser_get_path_part(path);`: here we get the path by using the `pathparse_get_path_part`, which we'll see next.
+- `        if (!path_part_str)`: here we check if the `path_part_str` isn't zero. if it is...
+- `                return 0;`: we return zero.
+- `        struct path_part* part = kzalloc(sizeof(struct path_part));`: here we allocate memory for our structure with the size of the structure itself.
+- `        part->part = path_part_str;`: here we access the `part->part` member of the structure and assign it the `path_part_str` path.
+- `        part->next = 0x00;`: here we assign `0x00` as a default value; this is because we don't know if there is a next part.
+- `        if (last_part)`: but if there is a next part...
+- `                last_part->next = part;`: we assign it to our structure.
+- `        return part;`: and we return `part`.
+Kinda complex, I know. Read it all the times you need to understand it. Or mail me!
+### 5.6.5. `static const char* pathparser_get_path_part(const char** path)`
+This function will get the path from the path part.
+```
+static const char* pathparser_get_path_part(const char** path)
+{
+        char* result_path_part = kzalloc(PEACHOS_MAX_PATH);
+        int i = 0;
+        while(**path != '/' && **path != 0x00)
+        {
+                result_path_part[i] = **path;
+                *path += 1;
+                i++;
+        }
+        if (**path == '/')
+        {
+                // skip / to avoid problems
+                *path += 1;
+        }
+
+        if (i == 0)
+        {
+                kfree(result_path_part);
+                result_path_part = 0;
+        }
+        return result_path_part;
+}
+```
+- `static const char* pathparser_get_path_part(const char** path)`: here we take a pointer to a pointer to a char `path`.
+- `        char* result_path_part = kzalloc(PEACHOS_MAX_PATH);`: here we allocate `result_path_part` with size 108.
+- `        int i = 0;`: here we initialize a counting variable.
+- `        while(**path != '/' && **path != 0x00)`: here we check if the element in `path` isn't `/` and if the element isn't `0x00`.
+- `                result_path_part[i] = **path;`: while in the loop, we assign `**path` (the element of the pointer to the pointer) to `result_path_part[i]`.
+- `                *path += 1;`: now we increment the pointer by one.
+- `                i++;`: and we also increment `i` by one, to populate the enxt item in the `result_path_part`, if there is an item, that is.
+- `        if (**path == '/')`: after finishing the loop, we check if the element in the `**path` is a `/`. if so...
+- `                *path += 1;`: we increment if by one, moving past the `/`
+- `        if (i == 0)`: we also check if `i` is zero. if it is, it means that we got the root or that we were already at the end of the path.
+- `                kfree(result_path_part);`: and then we free the memory in the `result_path_part` used by the structure.
+- `                result_path_part = 0;`: and we set the `result:_path_part` to zero.
+- `        return result_path_part;`: and we return!
+It's a little bit complex, all of this. I understand if you might feel a bit surpassed by all of this, but don't feel discouraged if you don't understand the code. Go over it, read line by line, use the debugger to go over the code execution, or hit me with an email. I'll find the time to help out :)
+### 5.6.6. `struct path_root* pathparser_parse(const char* path, const char* current_directory_path)`
+This will be the function that the programmer will see. It's a wrapper that uses all our previous functions. It's the last complex function, just a bit more to be done!
+```
+struct path_root* pathparser_parse(const char* path, const char* current_directory_path)
+{
+        int res = 0;
+        const char* tmp_path = path;
+        struct path_root* path_root = 0;
+        if (strlen(path) > PEACHOS_MAX_PATH)
+        {
+                goto out;
+        }
+
+        res = pathparser_get_drive_by_path(&tmp_path);
+        if (res < 0)
+        {
+                goto out;
+        }
+
+        path_root = path_parser_create_root(res);
+        if(!path_root)
+        {
+                goto out;
+        }
+        struct path_part* first_part = pathparser_parse_path_part(NULL, &tmp_path);
+        if (!first_part)
+        {
+                goto out;
+        }
+
+        path_root->first = first_part;
+
+        struct path_part* part = pathparser_parse_path_part(first_part, &tmp_path);
+
+        while(part)
+        {
+                part = pathparser_parse_path_part(part, &tmp_path);
+        }
+
+out:
+        return path_root;
+}
+```
+- `struct path_root* pathparser_parse(const char* path, const char* current_directory_path)`: function definition. we'll use this function to parse the path passed on to us by the user, and in the future we'll take into consideration the `current_directory_path`, but not right now.
+- `        int res = 0;`: here we set `res` for use later on.
+- `        const char* tmp_path = path;`: and here we create a pointer to the pointer `path` as to not modify the original pointer.
+- `        struct path_root* path_root = 0;`: here we initialize the root_path.
+- `        if (strlen(path) > PEACHOS_MAX_PATH)`: here we check if the size of the `char* path` passed onto us fits in the 108 byte limit we impossed. if `path` is higher than 108...
+- `                goto out;`: we go to out and return 0.
+- `        res = pathparser_get_drive_by_path(&tmp_path);`: here we get the drive number. it will also set `res` to the `drive_no`, which we'll use later.
+- `        if (res < 0)`: here we check if `res` is lower than zero. if it is...
+- `                goto out;`: we go to the `out` label and return 0.
+- `        path_root = path_parser_create_root(res);`: here is where we modfiy the actual `path_root` structure, passing in our `drive_no`. this will return `path_r`, which is a `path_root*` structure with `root` values set; that is, `drive_no` is zero and `first` is `0`.
+- `        if(!path_root)`: here we check if `path_root` isn't set, and if it isn't...
+- `                goto out;`: we go to the `out` label and return 0.
+- `        struct path_part* first_part = pathparser_parse_path_part(NULL, &tmp_path);`: here we initialize the `first_part` part of our path. we pass `NULL` because there is no previous part of the path yet. we also pass the `&tmb_path` (value of `tmp_path`) to the function. this function will return a `path_part` structure with populated values of the first item in the path and `0x00` as the `next` value, since there is no next part of the path yet.
+- `        if (!first_part)`: here we check if `first_part` isn't set. if it isn't...
+- `                goto out;`: we go to the `out` label and return 0.
+- `        path_root->first = first_part;`: now we can link our `path_root` with its `first` part, which is the `first_part`, a `path_part` structure that contains it's own value and the next one.
+- `        struct path_part* part = pathparser_parse_path_part(first_part, &tmp_path);`: now we'll initialize the next value. it'll we stored in the `part` pointer.
+- `        while(part)`: and if `part` is set...
+- `                part = pathparser_parse_path_part(part, &tmp_path);`: we can recursively assign each `next` part of our linked list.
+- `out:`: `out` label.
+- `        return path_root;`: and finally we return the linked list. the `path_root` contains all the items from `part` and whatever they might link to.
+That was the hardest part, the combination of everything we've written so far. Congratulations if you understood everything! It took me a couple hours to fully get, but I did it!
+### 5.6.7. `void pathparser_free(struct path_root* root)`
+And this function will free the allocated spaces of heap that we used during the root creation and path parsing.
+```
+void pathparser_free(struct path_root* root)
+{
+        struct path_part* part = root->first;
+        while(part)
+        {
+                struct path_part* next_part = part->next;
+                kfree((void*)part->part);
+                kfree(part);
+                part = next_part;
+        }
+        kfree(root);
+}
+```
+- `void pathparser_free(struct path_root* root)`: function definition. we'll just take the `path_root` object, since it already contains all the values we need from the linked list after initializing it.
+- `        struct path_part* part = root->first;`: here we access the `path_part` via our `path_root` `root` object.
+- `        while(part)`: and now we get into a loop that will run until `part` isn't set.
+- `                struct path_part* next_part = part->next;`: here we **must** assign the `next_part` before freeing the memory.
+- `                kfree((void*)part->part);`: now we free the `part` section of our path `part`
+- `                kfree(part);`: and now we can free the structure in its entirety.
+- `                part = next_part;`: and now we reassign the `part` pointer to the `next_part` pointer that we created previously.
+- `        kfree(root);`: after freeing every other member of the linked list, we can free the `path_root` `root` pointer.
+And done! The `pathparser_free` is way simpler than everything else we've seen so far, but it's an important function to make. Now, we'll continue to see the other minor changes we made to `kernel.h` and `status.h`.
+## 5.7. `kernel.h`
+We've just added some constants. Nothing complex.
+```
+...
+#define PEACHOS_MAX_PATH 108
+...
+```
+- `#define PEACHOS_MAX_PATH 108`: This constant will determine the maximum lenght of a part of a path.
+## 5.8 `status.h`
+We also added a new status to the file, which is just a constant.
+```
+...
+#define EBADPATH 4
+...
+```
+- `#define EBADPATH 4`: This status code will be used for bad paths, as we saw below.
+
+## 5.9. `kernel.c`
+This is the least important part. I'll show you how we can use the parser, just for demonstration purposes.
+```
+        struct path_root* root_path = pathparser_parse("0:/usr/bin/bash", NULL);
+
+        if(root_path)
+        {
+                print("[+] pathparse yay!");
+        }
+```
+- `        struct path_root* root_path = pathparser_parse("0:/usr/bin/bash", NULL);`: here we use the wrapper, passing a path (whatever that might be) and `NULL`, since we don't a current working directory.
+- `        if(root_path)`: unnecesary, but it's fun to get print messages when stuff works.
+- `                print("[+] pathparse yay!");`: and print some message.
+
+If we run the kernel, we won't see much happening apart from the `print` message. To check the results, we need to `print root_path` in GDB.
+![gdb root_path](https://github.com/4nt11/theos/blob/main/media/pparser.jpg)

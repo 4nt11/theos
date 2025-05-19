@@ -1,0 +1,34 @@
+# Linked lists.
+Before getting into path parsing, we need to understand what a linked list is. We'll use the linked list found in our code to represent them and show how they work.
+## Understanding the structs.
+Let's see them.
+```
+struct path_root
+{
+        int drive_no;
+        struct path_part* first;
+};
+
+struct path_part
+{
+        const char* part;
+        struct path_part* next;
+};
+```
+We have a `path_root` and a `path_part`. The `path_root` is the root of our filesystem and the initial item in our linked list. It then points to a `path_part`, which is a section of the path, like a `/`, a filename or a directory. Then, `path_part` links to a pointer to another `path_part`, and that then represents another section of the path.
+
+```
+path_root.first -> path_part1.part
+path_part1.next -> path_part2
+```
+And so on and so forth. We always have an item in our linked list that effectively links to another item. Take the following directory and file:
+```
+0:/bin/shell.o
+```
+1. We know that: `0` is the drive number (`drive_no`), and that `/` is the root, our first `path_part`. 
+2. Then the `/` `path_part` links to `next`, which is the `bin` directory. And it too links to the next element.
+3. And then `shell.o` is the `next` element of the `bin` `path_part`.
+
+`path_root` -> `path_part` (`/`) -> `path_part` (`bin`) -> `path_part` (`shell.o`)
+
+Hope that clears it out!

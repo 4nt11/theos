@@ -11,13 +11,17 @@ void* memset(void* ptr, int c, size_t size)
 	return ptr;
 }
 
-void* memcpy(void* src, void *dst, size_t size)
+int memcmp(void* s1, void* s2, int count)
 {
-	char* src_ptr = (char*)src;
-	char* dst_ptr = (char*)dst;
-	for (int i = 0; i < size; i++)
+	char* c1 = s1;
+	char* c2 = s2;
+
+	while(count-- > 0)
 	{
-		dst_ptr[i] = src_ptr[i];
+		if (*c1++ != *c2++) 
+		{
+			return c1[-1] < c2[-1] ? -1 : 1;
+		}
 	}
-	return dst;
+	return 0;
 }

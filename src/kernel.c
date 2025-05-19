@@ -8,6 +8,8 @@
 #include "memory/paging/paging.h"
 #include "memory/memory.h"
 #include "debug/debug.h"
+#include "fs/pparser.h"
+#include "string/string.h"
 
 uint16_t* video_mem = 0;
 uint16_t terminal_row = 0;
@@ -55,16 +57,6 @@ void terminal_initialize()
 	}
 }
 
-size_t strlen(const char* str)
-{
-	size_t len = 0;
-	while(str[len])
-	{
-		len++;
-	}
-	return len;
-}
-
 void print(const char* str)
 {
 	size_t len = strlen(str);
@@ -89,10 +81,14 @@ void kernel_main()
 	kernel_chunk = paging_new_4gb(PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
 	paging_switch(paging_4gb_chunk_get_directory(kernel_chunk));
 	enable_paging();
-	char buf[512];
-
-	disk_read_block(disk_get(0), 0, 3, &buf);
-
 	enable_interrupts();
+
+	struct path_root* root_path = pathparser_parse("0:/usr/bin/bash", NULL);
+	
+	if(root_path)
+	{
+		print("[+] pathparse yay!");
+	}
+
 
 }

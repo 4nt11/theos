@@ -1,6 +1,7 @@
 FILES = ./build/kernel.asm.o ./build/kernel.o ./build/idt/idt.asm.o ./build/idt/idt.o ./build/memory/memory.o \
 	./build/io/io.asm.o ./build/memory/heap/heap.o ./build/memory/heap/kheap.o ./build/memory/paging/paging.o \
-	./build/memory/paging/paging.asm.o ./build/debug/debug.o ./build/disk/disk.o
+	./build/memory/paging/paging.asm.o ./build/debug/debug.o ./build/disk/disk.o ./build/string/string.o \
+	./build/fs/pparser.o
 
 github: FLAGS += -fno-pie
 INCLUDES= -I./src
@@ -48,6 +49,12 @@ all: ./bin/kernel.bin ./bin/boot.bin
 
 ./build/memory/paging/paging.asm.o: ./src/memory/paging/paging.asm
 	nasm -f elf -g ./src/memory/paging/paging.asm -o ./build/memory/paging/paging.asm.o
+
+./build/fs/pparser.o: ./src/fs/pparser.c
+	i686-elf-gcc $(INCLUDES) -I./src/fs/ $(FLAGS) -std=gnu99 -c ./src/fs/pparser.c -o ./build/fs/pparser.o
+
+./build/string/string.o: ./src/string/string.c
+	i686-elf-gcc $(INCLUDES) -I./src/string/ $(FLAGS) -std=gnu99 -c ./src/string/string.c -o ./build/string/string.o
 
 ./build/disk/disk.o: ./src/disk/disk.c
 	i686-elf-gcc $(INCLUDES) -I./src/disk/ $(FLAGS) -std=gnu99 -c ./src/disk/disk.c -o ./build/disk/disk.o
