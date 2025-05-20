@@ -1,0 +1,807 @@
+# 1. Preparing to read from the hard hisk.
+## 1.1. PCI IDE Controller
+- IDE refers to the electrical specification of cables which connect ATA drives to a device.
+- IDE allows up to four disks to be connected.
+- There are four types of disks:
+	- ATA (Serial): known as SATA; used by modern hard drives.
+	- ATA (Parallel): known as PATA; used by hard drives.
+	- ATAPI (Serial): Used by modern optical drives.
+	- ATAPI (Parallel): Commonly used by optical drives.
+- We don't care if the drive is serial or parallel.
+## 1.2. Possible IDE Drive Types
+- Primary Master Drive.
+- Primary Slave Drive.
+- Secondary Master Drive.
+- Secondary Slave Drive.
+
+We'll be using the I/O operations we've implemented in the past to be able to read the disk sectors.
+
+# 2. Reading from the disk with the ATA Controller.
+Let's see the implementation of the LBA driver we made in Assembly in our `boot.asm` file but in C.
+## 2.1. `disk.c`
+### 2.1.1. `int disk_read_sector(int lba, int total, void* buffer)`
+```
+int disk_read_sector(int lba, int total, void* buffer)
+{
+        outb(0x1F6, (lba >> 24) | 0xE0);
+        outb(0x1F2, total);
+        outb(0x1F3, (unsigned char)(lba & 0xff));
+        outb(0x1F4, (unsigned char) lba >> 8);
+        outb(0x1F4, (unsigned char) lba >> 16);
+        outb(0x1F7, 0x20);
+
+        unsigned short* ptr = (unsigned short*) buffer;
+
+        for (int b = 0; b < total; b++)
+        {
+                char c = insb(0x1F7);
+                while(!(c & 0x08))
+                {
+                        c = insb(0x1F7);
+                }
+                // copy from hdd to memory
+                for (int i = 0; i < 256; i++)
+                {
+                        *ptr = insw(0x1F0);
+                        ptr++;
+                }
+        }
+        return 0;
+}
+```
+- `int disk_read_sector(int lba, int total, void* buffer)`: function definition. this might look very familiar. check out the `load32` and `ata_lba_read` labels in the `boot.asm` file. here, we're taking an `lba` (disk sector) initial sector (from), a `total` of sectors to read (up to) and a `buffer` in which we'll store the bytes read.
+- `        outb(0x1F6, (lba >> 24) | 0xE0);`: here we right shuffle `lba` by 24 bits and `OR` it with `0xE0` and sending this data to the `0x1F6` I/O port.
+	- if you look at `boot.asm`, the lines 73 to 76 might be familiar. this is because we're doing exactly that but in C.
+- `        outb(0x1F2, total);`: here we send the total amount of sectors to read into the `0x1F2` I/O port.
+- `        outb(0x1F3, (unsigned char)(lba & 0xff));`: in here we're sending the lower 8 bits to the `0x1F3` port. check the LBA ATA misc notes for info on this bitwise operation.
+- `        outb(0x1F4, (unsigned char) lba >> 8);`: Here we send the `lba` right shifted by 8 to the `0x1F4` port.
+- `        outb(0x1F4, (unsigned char) lba >> 16);`: And here we send the `lba` right shifted by 16 to the `0x1F4` port.
+- `        outb(0x1F7, 0x20);`: And now we set the command port `0x1F7` to `0x20` or the read sector command.
+- `        unsigned short* ptr = (unsigned short*) buffer;`: here we make a pointer to the buffer passed onto us by the caller. we need to cast it to be able to assign stuff to it.
+- `        for (int b = 0; b < total; b++)`: here we start a loop. we'll read `total` amount of bytes into the `ptr` buffer pointer.
+- `                char c = insb(0x1F7);`: here we read from the `0x1F7` port. we're expecting for...
+- `                while(!(c & 0x08))`: bit 0x08. this bit is sent to us by the LBA drive and tells us that it's ready to send the data.
+- `                        c = insb(0x1F7);`: here we continue to read and check if the `0x08` bit is set.
+- `                for (int i = 0; i < 256; i++)`: if the `0x08` bit is set we go into the reading loop.
+- `                        *ptr = insw(0x1F0);`: here we read two bytes into the `*ptr`.
+- `                        ptr++;`: and we increment the pointer until `i` is higher than 256.
+- `        return 0;`: and we return!
+
+If you didn't understand the code, I wholeheartedly recommed you reading on the `boot.asm` code again on the 3-PROTECTEDMODE page. It'll help you understand this code better.
+
+## 2.2 `disk.h`
+For now, we just publish the function in the header file.
+```
+#ifndef DISK_H
+#define DISK_H
+
+int disk_read_sector(int lba, int total, void* buffer);
+
+#endif 
+```
+# 3. Implementing a disk driver.
+Now, what we have already made will help us abstract more things. For example, we can give the programmer an interface to select a drive and read an amount of bytes from it. For now, we'll only have drive zero, but we'll fix that when the time is right.
+## 3.1. `disk.h`
+We've made some changes to the `disk.h` file. Mainly, we've created some constants and a struct to help us with our drives.
+```
+typedef unsigned int PEACHOS_DISK_TYPE;
+
+// real physical disk
+#define PEACHOS_DISK_TYPE_REAL 0
+
+struct disk
+{
+        PEACHOS_DISK_TYPE type;
+        int sector_size;
+};
+
+int disk_read_block(struct disk* idisk, unsigned int lba, int total, void* buf);
+struct disk* disk_get(int index);
+void disk_search_and_init();
+```
+- `typedef unsigned int PEACHOS_DISK_TYPE;`: here we create a type definition of `unsigned int` to a DISK_TYPE. it could be a drive, a partition, or something else.
+- `#define PEACHOS_DISK_TYPE_REAL 0`: here we define one of our disk types.
+- `struct disk`: here we'll create a disk structure that will help us create information and attributes to our disks. for now, it'll be quite simple.
+- `        PEACHOS_DISK_TYPE type;`: including its type and...
+- `        int sector_size;`: it's sector size.
+- `int disk_read_block(struct disk* idisk, unsigned int lba, int total, void* buf);`: function defintion. we'll see this later!
+- `struct disk* disk_get(int index);`: function defintion. we'll see this later!
+- `void disk_search_and_init();`: function defintion. we'll see this later!
+## 3.2. `disk.c`
+We've written three functions that will help us abstract the code and make our code more flexible. Let's go over them one by one.
+### 3.2.1. `void disk_search_and_init()`
+```
+struct disk disk;
+void disk_search_and_init()
+{
+        memset(&disk, 0, sizeof(disk));
+        disk.type = PEACHOS_DISK_TYPE_REAL;
+        disk.sector_size = PEACHOS_SECTOR_SIZE;
+}
+```
+- `struct disk disk;`: we create a structure in which we'll save our disk data.
+- `void disk_search_and_init()`: this function will initialize our disks and disk structures.
+- `        memset(&disk, 0, sizeof(disk));`: here we zero out the structure.
+- `        disk.type = PEACHOS_DISK_TYPE_REAL;`: here we assign a disk type of `PECHOS_DISK_TYPE_REAL`.
+- `        disk.sector_size = PEACHOS_SECTOR_SIZE;`: and here we assign the sector size. we haven't seen this constant definition, but know that it is 512.
+Pretty simple code! Let's continue.
+### 3.2.2. `struct disk* disk_get(int index)`
+```
+struct disk* disk_get(int index)
+{
+        if(index != 0)
+        {
+                return 0;
+        }
+        return &disk;
+}
+```
+- `struct disk* disk_get(int index)`: here we take a disk index. we're only working with disk ID 0, so it'll just return the disk for now.
+- `        if(index != 0)`: here we check if `index` is not zero.
+- `                return 0;`: if it's not zero, return 0 as any non zero index is invalid.
+- `        return &disk;`: and return a pointer to the disk.
+### 3.2.3. `int disk_read_block(struct disk* idisk, unsigned int lba, int total, void* buf)`
+```
+int disk_read_block(struct disk* idisk, unsigned int lba, int total, void* buf)
+{
+        if(idisk != &disk)
+        {
+                return -EIO;
+        }
+        return disk_read_sector(lba, total, buf);
+}
+```
+- `int disk_read_block(struct disk* idisk, unsigned int lba, int total, void* buf)`: this function will be the new way in which programmers will access the disks. it'll take a disk, an `lba` starting block, a `total` amount of sectors to read and a `buf` in which we'll store the data read.
+- `        if(idisk != &disk)`: here we check if the `idisk` is not the same as the disk we already have. this is for testing purposes and will be changed in the future.
+- `                return -EIO;`: if not &disk, then return `-EIO`
+- `        return disk_read_sector(lba, total, buf);`: and return the read sectors using the already available `disk_read_sector`.
+As you can see, we'll now use the `disk_read_block` function directly instead of calling the `disk_read_sector`. 
+## 3.3. `config.h`
+We've also defined some new constants in our `config.h` file.
+```
+#define PEACHOS_SECTOR_SIZE             512
+```
+It's just the sector size. That's it for now!
+# 4. What's a filesystem?
+- A filesystem is a structure that describes information stored in a disk.
+- Disks do not have the concept of a file. They are not aware of them.
+- But the operating system does know about files and uses the filesystem to read and write to or from files.
+# 4.1. Disks and what we already know.
+- Disks are gigantic arrays of data that are split into several sectors.
+- Each sector in a disk is given an LBA (Logical Block Address) number.
+- But "files" don't exist in the disk in the sense that we know them. They exist as pure data.
+## 4.2. Filesystem Structure
+- A filesystem contains raw data for files.
+- It contains the filesystem structure header which can explani things such as how many files are no the disk, where the root directory is in relation to its sectors and more.
+- They way files are laid out on disk is different depending on the filesystem at hand. For example: a "file" will not be the same or have the same structure in FAT32 versus EXT4. They might contain different metadata, different structures and so on.
+- Without filesystems, we'd we working with sector numbers and we'd have to write down where our files are in each sector by hand. It'd be very painful, and that's why we do filesystems.
+- Operating systems must have a way to read and understand these filesystems. That's why when you format a USB drive to EXT4 format, many Windows versions will say that the disk is "corrupt" (even though it isn't), because it has no idea what an EXT4 filesystem is and thus can't read from it or understand what's going on in it.
+## 4.3. FAT16 (File Allocation Table); 16 bits.
+- The first sector in this filesystem format is the boot sector on a disk. Fields also exist in this first sector that describe the filesystem, such as how many reserved sectors follow this sector.
+- Then follows the reserved sectors (if any) amd these sectors are typically ignored by the filesystem. There's a field in the bootsector that tells the operating system to ignore them. This isn't automatic and we must make our OS ignore them manually.
+- Then we have our first file allocation table. This table contains the values that represents which clusters on the disk are taken and which ones are free for use. A cluster is just a certain number of sectors joined together to represent a cluster.
+- There might be a second file allocation table, although this one it's optional and depends on whether the FAT6 header in the boot sector is set or not.
+- Then would come the root directory. This directory explains what files/directories are in the root directory of the filesystem. Each entry has a relative name that represents the file or directory name, attributes such as read or write permissions, address of the first cluster representing the data on the disk and more.
+- And then we have the data region. Our data is here! :)
+# 5. Creating a path parser.
+A path parser function will divide something like `/mnt/file.txt` into `drive, path, file`. Although it sounds simple (and it is), at first it looks and feels like very complex operations. With time, we'll realize that indeed, these are very simple and logical operations. Before getting into the parser itself, we'll move around some functions and create other ones that'll help us write the parser. Let's do it!
+## 5.1. `string.h`
+We've created some new code to be able to validate some stuff, like if a given `char` is a number, convert an ASCII number into an number of `int` type (because 1 is not the same as '1') and a couple more. I've also moved the `memcpy` function we saw before in here.
+```
+#ifndef STRING_H
+#define STRING_H
+#include <stddef.h>
+#include <stdbool.h>
+
+int strlen(const char* ptr);
+void* memcpy(void* src, void *dst, size_t size);
+bool isdigit(char c);
+int tonumericdigit(char c);
+int strnlen(const char* ptr, int max);
+
+#endif
+```
+- `int strlen(const char* ptr);`: although we've already made a `strlen` function, we'll move it in here, as to keep everything well organized.
+- `void* memcpy(void* src, void *dst, size_t size);`: and this `memcpy` function previously was in the `memory` section, but i've moved it here, since it makes more sense.
+- `bool isdigit(char c);`: this function will help us check is a `char` is a digit or not.
+- `int tonumericdigit(char c);`: this function will help us convert an ASCII digit into an actual number.
+- `int strnlen(const char* ptr, int max);`: this function will do a comparison between the lenght of `ptr` and `max`, and it will return different values if `ptr` is higher or lower than `max`.
+## 5.2. `string.c`
+Now, let's go over the actual code.
+### 5.2.1. `int strlen(const char* ptr);`
+```
+int strlen(const char* ptr)
+{
+        int len = 0;
+        while(*ptr != 0)
+        {
+                len++;
+                ptr += 1;
+        }
+        return len;
+}
+```
+- `int strlen(const char* ptr)`: function definition. we'll take a `const char* ptr`.
+- `        int len = 0;`: here we declare an initial `len` variable which we'll represent the lenght of the `ptr` passed on to us.
+- `        while(*ptr != 0)`: here we check if `*ptr` is NULL terminated or the end of the pointer.
+- `                len++;`: if not, we increment the lenght.
+- `                ptr += 1;`: and we also increment the pointer position.
+- `        return len;`: and we return the lenght.
+### 5.2.2. `void* memcpy(void* src, void *dst, size_t size);`
+We won't go over the `memcpy` code, as it has not changed. I just moved it here.
+### 5.2.3. `bool isdigit(char c);`
+```
+bool isdigit(char c)
+{
+        return c >= 48 && c <= 57;
+}
+```
+- `bool isdigit(char c)`: here we make a function that will take a `char c`. we will check its ASCII value and determine if it is between 48 and 57, which are integer numbers (check the ASCII table).
+- `        return c >= 48 && c <= 57;`: here we do a conditional return and check if `c` is higher or equal to 48 (which is a numeric `0`) and if it is lower or equal to 57 (which is numeric `9`). if true, we return true, if not, we return false (1=true, 0=false).
+### 5.2.4. `int tonumericdigit(char c);`
+```
+int tonumericdigit(char c)
+{
+        return c - 48;
+}
+```
+- `int tonumericdigit(char c)`: function definition. we'll take a `char c` that is supposed to be an ASCII digit.
+- `        return c - 48;`: here we make a conversion from ASCII digits to decimal digits. take ASCII value 50, which is `2`. 50-48 would equal to 2, which is, well, integer 2. in the ASCII table, `2` is `start of text`, but that doesn't matter to us, because we want the raw decimal value.
+### 5.2.5. `int strnlen(const char* ptr, int max);`
+```
+int strnlen(const char* ptr, int max)
+{
+        int len = 0;
+        for(int i = 0; i < max; i++)
+        {
+                if(ptr[i] == 0)
+                {
+                        break;
+                }
+        }
+        return len;
+}
+```
+- `int strnlen(const char* ptr, int max)`: as described before, we'll take a `ptr` and a `max` value and we'll use is to count and read a `max` amount of characters from `ptr` and return the `len`.
+- `        int i = 0;`: here we initialize `i` as integer to `0`.
+- `        for(i = 0; i < max; i++)`: here we start to go over the `ptr` items with `i`.
+- `                if(ptr[i] == 0)`: we check if `ptr[i]` is `0` (NULL terminator), and if so...
+- `                        break;`: break. if not, keep counting and increment `i`.
+- `        return len;`: and return `len`:
+This is all very simple. Because this, although it will help us make the path parser, isn't the path parser itself :) Let's go over the changes made to `memory.c` before getting our hands ***really*** dirty.
+## 5.3. `memory.h`
+We've added a prototype for `memcmp` and deleted some stuff that should've never been there, like `kzmalloc` and `memcpy`.
+```
+...
+int memcmp(void* s1, void* s2, int count);
+...
+```
+We'll go over `memcmp` right now.
+## 5.4. `memory.c`
+### 5.4.1. `int memcmp(void* s1, void* s2, int count)`
+```
+int memcmp(void* s1, void* s2, int count)
+{
+        char* c1 = s1;
+        char* c2 = s2;
+
+        while(count-- > 0)
+        {
+                if (*c1++ != *c2++)
+                {
+                        return c1[-1] < c2[-1] ? -1 : 1;
+                }
+        }
+        return 0;
+}
+```
+- `int memcmp(void* s1, void* s2, int count)`: function definition. we'll take two pointers and a `count` of bytes to check.
+- `        char* c1 = s1;`: here we make a pointer to the provided pointer.
+- `        char* c2 = s2;`: here we make a pointer to the provided pointer.
+- `        while(count-- > 0)`: here we make a while `count` minus one is higher than zero. `count` will be decremented every time the loop begins again.
+- `                if (*c1++ != *c2++)`: here we check if `c1++` and `c2++` are not equal. this increments `*c1` and `*c2` every time the `while` loop runs.
+- `                        return c1[-1] < c2[-1] ? -1 : 1;`: and here we make some tertiary operations. if the value of `c1[-1]` is lower than `c2[-1]`, then we return -1, but we return 1 if it's the other way around.
+- `        return 0;`: and we return 0 if the comparison is OK!
+For a while I wasn't able to understand that what that tertiary operation was doing. But after a couple minutes of reading, I understand.
+## 5.5. `pparser.h`
+Now we're getting into the interesting stuff. Before reading this section, I recommend reading about [linked lists](https://www.learn-c.org/en/Linked_lists). It's a fundamental data structure and you will need to understand how they work before getting into the section. Nevertheless, you can also read the path parsing notes in the misc section. Let's continue. As always, we won't go over the header guard.
+```
+struct path_root
+{
+        int drive_no;
+        struct path_part* first;
+};
+
+struct path_part
+{
+        const char* part;
+        struct path_part* next;
+};
+
+void pathparser_free(struct path_root* root);
+struct path_root* pathparser_parse(const char* path, const char* current_directory_path);
+```
+- `struct path_root`: we create a `path_root`. this will be the root of our filesystem.
+- `        int drive_no;`: the `root` also contains data on the drive number.
+- `        struct path_part* first;`: and then it links to a `path_part*` struture `first`, which would be files and directories right after `/`. in UNIX, it could be `bin, home, usr`, etc.
+- `struct path_part`: here we define the structure for everything else that is not the root.
+- `        const char* part;`: here we establish the identifier for that part of the path. it could be, for example, `bin`.
+- `        struct path_part* next;`: and here we establish a link to the `next` item within that directory, which is the same type as the one we're defining right now.
+- `void pathparser_free(struct path_root* root);`: here we set a `pathparser_free` function, but we'll see it later.
+- `struct path_root* pathparser_parse(const char* path, const char* current_directory_path);`: same here. we'll see it later on.
+## 5.6. `pparser.c`
+Now we're getting into the MEAT and POTATOES! Let's go!
+
+### 5.6.1. `static int pathparser_get_drive_by_path(const char** path)`
+this function will get the drive number by using the `path` passed onto it.
+```
+static int pathparser_get_drive_by_path(const char** path)
+{
+        if(!pathparser_path_valid_format(*path))
+        {
+                return -EBADPATH;
+        }
+        int drive_no = tonumericdigit(*path[0]);
+
+        // add 3 bytes to skip drive number
+        *path += 3;
+        return drive_no;
+}
+```
+- `static int pathparser_get_drive_by_path(const char** path)`: here we'll take a pointer to a `char` pointer, or a pointer to a string. the `static` means that the function won't be changing any values passed onto it.
+- `        if(!pathparser_path_valid_format(*path))`: here we check if the passed value is a valid format. we'll check this function next.
+- `                return -EBADPATH;`: if not, return `-EBADPATH` or -4. we'll see this at the end.
+- `        int drive_no = tonumericdigit(*path[0]);`: here we convert the first element of the char array into a numeric digit from an ASCII digit into a decimal digit.
+- `        *path += 3;`: here we increment the pointer passed by the user by 3.
+- `        return drive_no;`: and we return the `drive_no`.
+The `path` in this case is something like `0:/bin/bash`. When we do `*path += 3`, we are effectively moving the pointer past the `0:/` section of the path. This isn't changing the pointer, it's just incrementing it, as the data contained has not been changed.
+### 5.6.2. `static int pathparser_path_valid_format(const char* filename)`
+This function will validate the path format.
+```
+static int pathparser_path_valid_format(const char* filename)
+{
+        int len = strnlen(filename, PEACHOS_MAX_PATH);
+        return (len >= 3 && isdigit(filename[0]) && memcmp((void*)&filename[1], ":/", 2) == 0);
+}
+```
+- `static int pathparser_path_valid_format(const char* filename)`: here we take a `*filename`, effectively a path. we won't be changing the values passed onto us.
+- `        int len = strnlen(filename, PEACHOS_MAX_PATH);`: here we first check if the `len` of `filename` is higher than the maximum path size, which is 108. we'll see this change at the end.
+- `        return (len >= 3 && isdigit(filename[0]) && memcmp((void*)&filename[1], ":/", 2) == 0);`: here we make a wacky conditional return. we first check if `len` is higher or equal to 3, we then check if the first character is a digit and then we make a `memcmp` between the second and third item in the `filename` array with `:/`. if all of these conditions are met, the path is valid and we return zero.
+### 5.6.3. `static struct path_root* path_parser_create_root(int drive_number)`
+This function will setup the root path structure.
+```
+static struct path_root* path_parser_create_root(int drive_number)
+{
+        struct path_root* path_r = kzalloc(sizeof(struct path_root));
+        path_r->drive_no = drive_number;
+        path_r->first = 0;
+        return path_r;
+}
+```
+- `static struct path_root* path_parser_create_root(int drive_number)`: here we take the drive number as an argument.
+- `        struct path_root* path_r = kzalloc(sizeof(struct path_root));`: now we create a `path_root` structure and we kzalloc
+- `        path_r->drive_no = drive_number;`: here we access the member `drive_no` of the pointer to the pointer that points to the `path_root` structure and set the `drive_no` item to `drive_number`.
+- `        path_r->first = 0;`: here we do the same as above. `0` in this case represents the first section of our path, which is `0`, like in `0:/bin/bash`.
+- `        return path_r;`: and here we return the pointer to the pointer to the struct.
+### 5.6.4. `struct path_part* pathparser_parse_path_part(struct path_part* last_part, const char** path)`
+This function will parse the path part from the `last_part` using the `path`.
+```
+struct path_part* pathparser_parse_path_part(struct path_part* last_part, const char** path)
+{
+        const char* path_part_str = pathparser_get_path_part(path);
+        if (!path_part_str)
+        {
+                return 0;
+        }
+
+        struct path_part* part = kzalloc(sizeof(struct path_part));
+        part->part = path_part_str;
+        part->next = 0x00;
+
+        if (last_part)
+        {
+                last_part->next = part;
+        }
+
+        return part;
+}
+```
+- `struct path_part* pathparser_parse_path_part(struct path_part* last_part, const char** path)`: function definition. we'll use this function to parse the path parts that are passed to us by `last_part` and the pointer to the char pointer `path` itself.
+- `        const char* path_part_str = pathparser_get_path_part(path);`: here we get the path by using the `pathparse_get_path_part`, which we'll see next.
+- `        if (!path_part_str)`: here we check if the `path_part_str` isn't zero. if it is...
+- `                return 0;`: we return zero.
+- `        struct path_part* part = kzalloc(sizeof(struct path_part));`: here we allocate memory for our structure with the size of the structure itself.
+- `        part->part = path_part_str;`: here we access the `part->part` member of the structure and assign it the `path_part_str` path.
+- `        part->next = 0x00;`: here we assign `0x00` as a default value; this is because we don't know if there is a next part.
+- `        if (last_part)`: but if there is a next part...
+- `                last_part->next = part;`: we assign it to our structure.
+- `        return part;`: and we return `part`.
+Kinda complex, I know. Read it all the times you need to understand it. Or mail me!
+### 5.6.5. `static const char* pathparser_get_path_part(const char** path)`
+This function will get the path from the path part.
+```
+static const char* pathparser_get_path_part(const char** path)
+{
+        char* result_path_part = kzalloc(PEACHOS_MAX_PATH);
+        int i = 0;
+        while(**path != '/' && **path != 0x00)
+        {
+                result_path_part[i] = **path;
+                *path += 1;
+                i++;
+        }
+        if (**path == '/')
+        {
+                // skip / to avoid problems
+                *path += 1;
+        }
+
+        if (i == 0)
+        {
+                kfree(result_path_part);
+                result_path_part = 0;
+        }
+        return result_path_part;
+}
+```
+- `static const char* pathparser_get_path_part(const char** path)`: here we take a pointer to a pointer to a char `path`.
+- `        char* result_path_part = kzalloc(PEACHOS_MAX_PATH);`: here we allocate `result_path_part` with size 108.
+- `        int i = 0;`: here we initialize a counting variable.
+- `        while(**path != '/' && **path != 0x00)`: here we check if the element in `path` isn't `/` and if the element isn't `0x00`.
+- `                result_path_part[i] = **path;`: while in the loop, we assign `**path` (the element of the pointer to the pointer) to `result_path_part[i]`.
+- `                *path += 1;`: now we increment the pointer by one.
+- `                i++;`: and we also increment `i` by one, to populate the enxt item in the `result_path_part`, if there is an item, that is.
+- `        if (**path == '/')`: after finishing the loop, we check if the element in the `**path` is a `/`. if so...
+- `                *path += 1;`: we increment if by one, moving past the `/`
+- `        if (i == 0)`: we also check if `i` is zero. if it is, it means that we got the root or that we were already at the end of the path.
+- `                kfree(result_path_part);`: and then we free the memory in the `result_path_part` used by the structure.
+- `                result_path_part = 0;`: and we set the `result:_path_part` to zero.
+- `        return result_path_part;`: and we return!
+It's a little bit complex, all of this. I understand if you might feel a bit surpassed by all of this, but don't feel discouraged if you don't understand the code. Go over it, read line by line, use the debugger to go over the code execution, or hit me with an email. I'll find the time to help out :)
+### 5.6.6. `struct path_root* pathparser_parse(const char* path, const char* current_directory_path)`
+This will be the function that the programmer will see. It's a wrapper that uses all our previous functions. It's the last complex function, just a bit more to be done!
+```
+struct path_root* pathparser_parse(const char* path, const char* current_directory_path)
+{
+        int res = 0;
+        const char* tmp_path = path;
+        struct path_root* path_root = 0;
+        if (strlen(path) > PEACHOS_MAX_PATH)
+        {
+                goto out;
+        }
+
+        res = pathparser_get_drive_by_path(&tmp_path);
+        if (res < 0)
+        {
+                goto out;
+        }
+
+        path_root = path_parser_create_root(res);
+        if(!path_root)
+        {
+                goto out;
+        }
+        struct path_part* first_part = pathparser_parse_path_part(NULL, &tmp_path);
+        if (!first_part)
+        {
+                goto out;
+        }
+
+        path_root->first = first_part;
+
+        struct path_part* part = pathparser_parse_path_part(first_part, &tmp_path);
+
+        while(part)
+        {
+                part = pathparser_parse_path_part(part, &tmp_path);
+        }
+
+out:
+        return path_root;
+}
+```
+- `struct path_root* pathparser_parse(const char* path, const char* current_directory_path)`: function definition. we'll use this function to parse the path passed on to us by the user, and in the future we'll take into consideration the `current_directory_path`, but not right now.
+- `        int res = 0;`: here we set `res` for use later on.
+- `        const char* tmp_path = path;`: and here we create a pointer to the pointer `path` as to not modify the original pointer.
+- `        struct path_root* path_root = 0;`: here we initialize the root_path.
+- `        if (strlen(path) > PEACHOS_MAX_PATH)`: here we check if the size of the `char* path` passed onto us fits in the 108 byte limit we impossed. if `path` is higher than 108...
+- `                goto out;`: we go to out and return 0.
+- `        res = pathparser_get_drive_by_path(&tmp_path);`: here we get the drive number. it will also set `res` to the `drive_no`, which we'll use later.
+- `        if (res < 0)`: here we check if `res` is lower than zero. if it is...
+- `                goto out;`: we go to the `out` label and return 0.
+- `        path_root = path_parser_create_root(res);`: here is where we modfiy the actual `path_root` structure, passing in our `drive_no`. this will return `path_r`, which is a `path_root*` structure with `root` values set; that is, `drive_no` is zero and `first` is `0`.
+- `        if(!path_root)`: here we check if `path_root` isn't set, and if it isn't...
+- `                goto out;`: we go to the `out` label and return 0.
+- `        struct path_part* first_part = pathparser_parse_path_part(NULL, &tmp_path);`: here we initialize the `first_part` part of our path. we pass `NULL` because there is no previous part of the path yet. we also pass the `&tmb_path` (value of `tmp_path`) to the function. this function will return a `path_part` structure with populated values of the first item in the path and `0x00` as the `next` value, since there is no next part of the path yet.
+- `        if (!first_part)`: here we check if `first_part` isn't set. if it isn't...
+- `                goto out;`: we go to the `out` label and return 0.
+- `        path_root->first = first_part;`: now we can link our `path_root` with its `first` part, which is the `first_part`, a `path_part` structure that contains it's own value and the next one.
+- `        struct path_part* part = pathparser_parse_path_part(first_part, &tmp_path);`: now we'll initialize the next value. it'll we stored in the `part` pointer.
+- `        while(part)`: and if `part` is set...
+- `                part = pathparser_parse_path_part(part, &tmp_path);`: we can recursively assign each `next` part of our linked list.
+- `out:`: `out` label.
+- `        return path_root;`: and finally we return the linked list. the `path_root` contains all the items from `part` and whatever they might link to.
+That was the hardest part, the combination of everything we've written so far. Congratulations if you understood everything! It took me a couple hours to fully get, but I did it!
+### 5.6.7. `void pathparser_free(struct path_root* root)`
+And this function will free the allocated spaces of heap that we used during the root creation and path parsing.
+```
+void pathparser_free(struct path_root* root)
+{
+        struct path_part* part = root->first;
+        while(part)
+        {
+                struct path_part* next_part = part->next;
+                kfree((void*)part->part);
+                kfree(part);
+                part = next_part;
+        }
+        kfree(root);
+}
+```
+- `void pathparser_free(struct path_root* root)`: function definition. we'll just take the `path_root` object, since it already contains all the values we need from the linked list after initializing it.
+- `        struct path_part* part = root->first;`: here we access the `path_part` via our `path_root` `root` object.
+- `        while(part)`: and now we get into a loop that will run until `part` isn't set.
+- `                struct path_part* next_part = part->next;`: here we **must** assign the `next_part` before freeing the memory.
+- `                kfree((void*)part->part);`: now we free the `part` section of our path `part`
+- `                kfree(part);`: and now we can free the structure in its entirety.
+- `                part = next_part;`: and now we reassign the `part` pointer to the `next_part` pointer that we created previously.
+- `        kfree(root);`: after freeing every other member of the linked list, we can free the `path_root` `root` pointer.
+And done! The `pathparser_free` is way simpler than everything else we've seen so far, but it's an important function to make. Now, we'll continue to see the other minor changes we made to `kernel.h` and `status.h`.
+## 5.7. `kernel.h`
+We've just added some constants. Nothing complex.
+```
+...
+#define PEACHOS_MAX_PATH 108
+...
+```
+- `#define PEACHOS_MAX_PATH 108`: This constant will determine the maximum lenght of a part of a path.
+## 5.8 `status.h`
+We also added a new status to the file, which is just a constant.
+```
+...
+#define EBADPATH 4
+...
+```
+- `#define EBADPATH 4`: This status code will be used for bad paths, as we saw below.
+
+## 5.9. `kernel.c`
+This is the least important part. I'll show you how we can use the parser, just for demonstration purposes.
+```
+        struct path_root* root_path = pathparser_parse("0:/usr/bin/bash", NULL);
+
+        if(root_path)
+        {
+                print("[+] pathparse yay!");
+        }
+```
+- `        struct path_root* root_path = pathparser_parse("0:/usr/bin/bash", NULL);`: here we use the wrapper, passing a path (whatever that might be) and `NULL`, since we don't a current working directory.
+- `        if(root_path)`: unnecesary, but it's fun to get print messages when stuff works.
+- `                print("[+] pathparse yay!");`: and print some message.
+
+If we run the kernel, we won't see much happening apart from the `print` message. To check the results, we need to `print root_path` in GDB.
+![gdb root_path](https://github.com/4nt11/theos/blob/main/media/pparser.jpg)
+
+# 6. Creating a disk stream.
+We will implement a way in which we can stop reading from the disk in sectors and start reading from it in bytes.
+## 6.1. `streamer.h`
+We've created a header file for our streamer. We'll just define some structures and prototypes.
+```
+#ifndef DISKSTREAMER_H
+#define DISKSTREAMER_H
+#include "disk.h"
+
+struct disk_stream
+{
+        int pos;
+        struct disk* disk;
+};
+
+struct disk_stream* diskstreamer_new(int disk_id);
+int diskstreamer_seek(struct disk_stream* stream, int pos);
+int diskstreamer_read(struct disk_stream* stream, void* out, int total);
+void diskstreamer_close(struct disk_stream* stream);
+
+
+#endif
+```
+- `struct disk_stream`: `disk_stream` structure definition.
+- `        int pos;`: the `disk_stream` will have a `pos` value that will be used to know where the streamer is currently located.
+- `        struct disk* disk;`: and it also has a `disk` `disk` structure, which will point to a given disk.
+- `struct disk_stream* diskstreamer_new(int disk_id);`: prototype. we'll see it later.
+- `int diskstreamer_seek(struct disk_stream* stream, int pos);`: prototype. we'll see it later.
+- `int diskstreamer_read(struct disk_stream* stream, void* out, int total);`: prototype. we'll see it later.
+- `void diskstreamer_close(struct disk_stream* stream);`: prototype. we'll see it later.
+Now, let's go over the code.
+## 6.2. `streamer.c`
+
+### 6.2.1. `struct disk_stream* diskstreamer_new(int disk_id);`
+We will use this function to create a streamer.
+```
+struct disk_stream* diskstreamer_new(int disk_id)
+{
+        struct disk* disk = disk_get(disk_id);
+        if(!disk)
+        {
+                return 0;
+        }
+
+        struct disk_stream* streamer = kzalloc(sizeof(struct disk_stream));
+        streamer->pos = 0;
+        streamer->disk = disk;
+
+        return streamer;
+}
+```
+- `struct disk_stream* diskstreamer_new(int disk_id)`: function definition. we'll receive a disk number (usually 0) as to point the new `disk_stream` to that disk number.
+- `        struct disk* disk = disk_get(disk_id);`: here we get the disk. now it only returns `0` to non `0` values. if zero, it returns a disk object defined in the `disk.c` file.
+- `        if(!disk)`: here we check if we got the correct values from `disk_get` call.
+- `                return 0;`: if we didn't, return 0.
+- `        struct disk_stream* streamer = kzalloc(sizeof(struct disk_stream));`: here we allocate enough heap space for our `streamer` structure.
+- `        streamer->pos = 0;`: here we set the initial position of the streamer.
+- `        streamer->disk = disk;`: and here we set the disk to the disk passed onto us.
+- `        return streamer;`: and we return the streamer object.
+### 6.2.2. `int diskstreamer_seek(struct disk_stream* stream, int pos);`
+We will use this function to change the `pos` value of the streamer. We'll see the usage of `pos` in the next function.
+```
+int diskstreamer_seek(struct disk_stream* stream, int pos)
+{
+        stream->pos = pos;
+        return 0;
+}
+```
+- `int diskstreamer_seek(struct disk_stream* stream, int pos)`: function definition. it takes a (previously created) streamer and it's new `pos` value.
+- `        stream->pos = pos;`: accessing the `pos` member and setting it to `pos` passed by the user.
+- `        return 0;`: and return.
+### 6.2.3. `int diskstreamer_read(struct disk_stream* stream, void* out, int total);`
+This function will be used to read the data stream into the `out` pointer. We're supposed to pass it a `disk_stream`, the `out` pointer and the `total` amount of bytes. Here, we'll use the `stream->pos` value to read from `pos`.
+```
+int diskstreamer_read(struct disk_stream* stream, void* out, int total)
+{
+        int sector = stream->pos / PEACHOS_SECTOR_SIZE;
+        int offset = stream->pos % PEACHOS_SECTOR_SIZE;
+        char buf[PEACHOS_SECTOR_SIZE];
+
+        int res = disk_read_block(stream->disk, sector, 1, buf);
+        if(res < 0)
+        {
+                goto out;
+        }
+
+        int total_to_read = total > PEACHOS_SECTOR_SIZE ? PEACHOS_SECTOR_SIZE : total;
+        for(int i = 0; i < total_to_read; i++)
+        {
+                *(char*)out++ = buf[offset+i];
+        }
+        stream->pos += total_to_read;
+        if(total > PEACHOS_SECTOR_SIZE)
+        {
+                res = diskstreamer_read(stream, out, total-PEACHOS_SECTOR_SIZE);
+        }
+
+out:
+        return res;
+
+}
+```
+- `int diskstreamer_read(struct disk_stream* stream, void* out, int total)`: function definition we'll take a streamer object, a pointer and a `total` amount of bytes to read into the `out` pointer.
+- `        int sector = stream->pos / PEACHOS_SECTOR_SIZE;`: here we get the sector of the disk. if the value is, for example, `30`, then `30 / PEACHOS_SECTOR_SIZE` returns 0; if 513, then it's `513 / PEACHOS_SECTOR_SIZE` or 1.
+- `        int offset = stream->pos % PEACHOS_SECTOR_SIZE;`: now we get the offset of the bytes in relation to the sector. this will be used as our starting byte to read from. if `pos` is 30, then `30 % PEACHOS_SECTOR_SIZE` equals 30. and if `pos` 513, then `1`.
+	- in the second case it returns 1 because it's indeed the first byte of sector 1 (or second sector, counting from zero).
+- `        char buf[PEACHOS_SECTOR_SIZE];`: here we assign a buffer of `PEACHOS_SECTOR_SIZE` bytes to read into. we don't care if we're reading less than that, we need a buffer big enough as to not cause overflows.
+- `        int res = disk_read_block(stream->disk, sector, 1, buf);`: here we use the `disk_read_block` that we previously made. this will only read the `sector` calculated previously and store the data into `buf`.
+- `        if(res < 0)`: here we check if the read was successful.
+- `                goto out;`: if not, return the error.
+- `        int total_to_read = total > PEACHOS_SECTOR_SIZE ? PEACHOS_SECTOR_SIZE : total;`: this is a ternary assignation we first check if the `total` bytes to read is higher than the `PEACHOS_SECTOR_SIZE` and if so, assign the `PEACHOS_SECTOR_SIZE` to `total_to_read`. if lower, assign the total value.
+	- this is a recursive function. if we were to read 514 bytes, the function itself would run within itself. we'll see this in a bit.
+- `        for(int i = 0; i < total_to_read; i++)`: `for` loop to read the bytes.
+- `                *(char*)out++ = buf[offset+i];`: tricky pointer magic. here, we cast the `out` pointer into a `char` pointer and then dereferencing the pointer. after that, we assign the `buf[offset+i]` to the current pointer position and finally incrementing it. we assign `buf[offset+i]` because `offset+i` it's the byte that was asked from the function.
+	- `out++` and `++out` are different. `out++` increments after assignment and `++out` increments prior to assignment.
+- `        stream->pos += total_to_read;`: here we increment the `pos` by `total_to_read` bytes. this is because we've already read those bytes.
+- `        if(total > PEACHOS_SECTOR_SIZE)`: here we check again if `total` is higher than `PEACHOS_SECTOR_SIZE`. if so...
+- `                res = diskstreamer_read(stream, out, total-PEACHOS_SECTOR_SIZE);`: we call ourselves, but `total` is now subtracted `PEACHOS_TOTAL_SECTORS`. this changes the `total` variable for the next pass of the function, and will do until it becomes 0. this new call also modifies the `out` pointer directly (as we previously did), so there's no need to return `out`.
+- `out:`: `out` label.
+- `        return res;`: here we return `res`.
+That was a little bit of pointer magic. But we did it.
+### 6.2.4. `void diskstreamer_close(struct disk_stream* stream);`
+And when we're done using the stream, we can call this function to free the memory that it used.
+```
+void diskstreamer_close(struct disk_stream* stream)
+{
+        kfree(stream);
+}
+```
+- `void diskstreamer_close(struct disk_stream* stream)`: function definition. it takes a previously created `streamer` object.
+- `        kfree(stream);`: here we free the `stream` pointer.
+# 7. File Allocation Table (FAT)
+- It's a filesystem developed by Microsoft.
+- It consists of a series of clusters of data and a table that determines the state of the clusters.
+- The boot sector contains information about the filesystem.
+## 7.1. FAT16 Filesystem
+- This filesystem uses clusters to represent data, directories and files.
+- Each and every cluster uses a fixed amount of sectors which is specified in the boot sector.
+- Every file in tha FAT16 filesystem needs to use at least one cluster for its data. This means that a lot of storage is wasted for small files.
+- FAT16 can't store files larger than 2 gigabytes without large file support. With large file support, it can hold files up to 4 gigabytes.
+- It's very easy to implement.
+## 7.2. FAT16 Disk Layout
+
+| Name              | Size                                                                                     |
+| ----------------- | ---------------------------------------------------------------------------------------- |
+| Boot sector       | 512 bytes.                                                                               |
+| Reserved sectors. | fat_header.reserved_sectors \* 512*                                                      |
+| FAT 1             | fat_header.sectors_per_fat \* 512                                                        |
+| FAT 2 (Optional)  | fat_header.sectors_per_fat \* 512                                                        |
+| Root directory.   | fat_header.root_dir_entries \* sizeof(struct fat_directory_item) (**rounded if needed**) |
+| Data clusters.    | ...rest of disk.                                                                         |
+## 7.3. FAT16 Boot Sector
+The FAT16 boot sector is basically the Boot Parameter Block. Check the BIOS BPB entry on the misc notes.
+## 7.4. FAT16 File Allocation: Clusters in disk.
+- In the FAT table, we'll find that each cluster is represented as an entry of two bytes. Each two byte represent a cluster in the data region that is taken, free or in use.
+- Clusters can be chained together. An example would be a file larger than a cluster. It'd use one or more clusters, obviously.
+- When files use more than one cluster, the first cluster entry will too point to the next cluster in use and so on. The final cluster will contain the value `0xFFFF`, which means the end of the cluster chain.
+- The size of a cluster is determined by the values in the boot sector
+Example cluster table:
+
+| Entry zero | Entry one  | Entry two | Entry three |
+| ---------- | ---------- | --------- | ----------- |
+| 0x0003     | 0xFFFF     | 0xFFFF    | 0xFFFF      |
+| Entry four | Entry five | Entry six | Entry seven |
+| 0x0000     | 0x0000     | 0x0000    | 0x0000      |
+We have a cluster chain at entry zero. We know this because the first cluster entry has decimal 3. So, counting from zero, we can see that the final cluster would be located at entry three.
+\*Note: Cluster zero isn't used most of the time. FAT usually starts from cluster three and so forth.
+## 7.5. How are clusters accessed?
+If we wanted to, for example, access the third cluster in the FAT table, we'd take the
+
+`cluster index * size of cluster`
+
+If each cluster is 512 bytes in size and we wanted the data from the third cluster, we'd do: `3 * 512` and we'd have to access bytes 1536.
+## 7.6. FAT16 Root Directory
+- It's the top directory, like `C:\` or `/`.
+- Directories contain directory entries of a fixed size.
+## 7.7. FAT16 Directory Entry
+A typical directory entry would look like this:
+```
+struct fat_directory_item
+{
+	uint8_t filename[8];
+	uint8_t ext[3].
+	uint8_t attribute;
+	uint8_t reserved;
+	uint8_t creation_time_tenths_of_a_sec;
+	uint16_t creation_time;
+	uint16_t creation_date;
+	uint16_t last_access;
+	uint16_t high_16_bits_first_cluster;
+	uint16_t last_mod_time;
+	uint16_t last_mod_date;
+	uint16_t low_16_bits_first_cluster;
+	uint32_t filesize;
+} __attribute__((packed));
+```
+It's a lot of stuff, but everything is quite simple. FYI: the `attributes` item is used to declare the type of file (file or directory), read access, write access and so on.
+## 7.8 Iterating through directories
+- The boot sector contains the maximum number of root directory entries. We should not exceed this value when iterating through the root directory.
+- We know that when we finish iterating through the root directory or a subdirectory, because the first byte of our filename will be equal to zero.
+## 7.9. Directory entry attribute flags
+
+| Flag   | Description                        |
+| ------ | ---------------------------------- |
+| `0x01` | Read only.                         |
+| `0x02` | File hidden.                       |
+| `0x04` | System file. Do not move clusters. |
+| `0x08` | Volume label.                      |
+| `0x10` | This is a directory.               |
+| `0x20` | Archived.                          |
+| `0x40` | Device.                            |
+| `0x80` | Reserved.                          |
+## 7.10. Filenames and extensions.
+- The filename is 8 bytes wide and unused bytes are padded with spaces (`0x20`).
+- The extension is 3 bytes wide and unused bytes are padded with spaces (`0x20`).
+## 7.11. Clusters
+- Each cluster represents a fixed amount of sectors in the disk, linearly to each other.
+- The amount of sectors that represents a cluster is stored in the boot sector.
+- The data clusters section in the filesystem contains all the clusters that make up the subdirectories and file data of files throughout the FAT filesystem.
+## 7.12. Tips
+- Always use `__attribute__((packed))` when working with structures that are to be stored or read from the disk. The C compiler might try to optimize the structure and change it. We **DO NOT** want this when working with raw data to or from and the disk.
+- Learn to use GDB!
+
