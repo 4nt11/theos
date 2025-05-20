@@ -10,6 +10,7 @@
 #include "debug/debug.h"
 #include "fs/pparser.h"
 #include "string/string.h"
+#include "disk/streamer.h"
 
 uint16_t* video_mem = 0;
 uint16_t terminal_row = 0;
@@ -83,12 +84,9 @@ void kernel_main()
 	enable_paging();
 	enable_interrupts();
 
-	struct path_root* root_path = pathparser_parse("0:/usr/bin/bash", NULL);
-	
-	if(root_path)
-	{
-		print("[+] pathparse yay!");
-	}
-
-
+	struct disk_stream* streamer = diskstreamer_new(0);
+	diskstreamer_seek(streamer, 0x201);
+	unsigned char c = 0;
+	diskstreamer_read(streamer, &c, 1);
+	while(1) {}
 }

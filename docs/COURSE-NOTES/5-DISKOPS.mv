@@ -581,3 +581,227 @@ This is the least important part. I'll show you how we can use the parser, just 
 
 If we run the kernel, we won't see much happening apart from the `print` message. To check the results, we need to `print root_path` in GDB.
 ![gdb root_path](https://github.com/4nt11/theos/blob/main/media/pparser.jpg)
+
+# 6. Creating a disk stream.
+We will implement a way in which we can stop reading from the disk in sectors and start reading from it in bytes.
+## 6.1. `streamer.h`
+We've created a header file for our streamer. We'll just define some structures and prototypes.
+```
+#ifndef DISKSTREAMER_H
+#define DISKSTREAMER_H
+#include "disk.h"
+
+struct disk_stream
+{
+        int pos;
+        struct disk* disk;
+};
+
+struct disk_stream* diskstreamer_new(int disk_id);
+int diskstreamer_seek(struct disk_stream* stream, int pos);
+int diskstreamer_read(struct disk_stream* stream, void* out, int total);
+void diskstreamer_close(struct disk_stream* stream);
+
+
+#endif
+```
+- `struct disk_stream`: `disk_stream` structure definition.
+- `        int pos;`: the `disk_stream` will have a `pos` value that will be used to know where the streamer is currently located.
+- `        struct disk* disk;`: and it also has a `disk` `disk` structure, which will point to a given disk.
+- `struct disk_stream* diskstreamer_new(int disk_id);`: prototype. we'll see it later.
+- `int diskstreamer_seek(struct disk_stream* stream, int pos);`: prototype. we'll see it later.
+- `int diskstreamer_read(struct disk_stream* stream, void* out, int total);`: prototype. we'll see it later.
+- `void diskstreamer_close(struct disk_stream* stream);`: prototype. we'll see it later.
+Now, let's go over the code.
+## 6.2. `streamer.c`
+
+### 6.2.1. `struct disk_stream* diskstreamer_new(int disk_id);`
+We will use this function to create a streamer.
+```
+struct disk_stream* diskstreamer_new(int disk_id)
+{
+        struct disk* disk = disk_get(disk_id);
+        if(!disk)
+        {
+                return 0;
+        }
+
+        struct disk_stream* streamer = kzalloc(sizeof(struct disk_stream));
+        streamer->pos = 0;
+        streamer->disk = disk;
+
+        return streamer;
+}
+```
+- `struct disk_stream* diskstreamer_new(int disk_id)`: function definition. we'll receive a disk number (usually 0) as to point the new `disk_stream` to that disk number.
+- `        struct disk* disk = disk_get(disk_id);`: here we get the disk. now it only returns `0` to non `0` values. if zero, it returns a disk object defined in the `disk.c` file.
+- `        if(!disk)`: here we check if we got the correct values from `disk_get` call.
+- `                return 0;`: if we didn't, return 0.
+- `        struct disk_stream* streamer = kzalloc(sizeof(struct disk_stream));`: here we allocate enough heap space for our `streamer` structure.
+- `        streamer->pos = 0;`: here we set the initial position of the streamer.
+- `        streamer->disk = disk;`: and here we set the disk to the disk passed onto us.
+- `        return streamer;`: and we return the streamer object.
+### 6.2.2. `int diskstreamer_seek(struct disk_stream* stream, int pos);`
+We will use this function to change the `pos` value of the streamer. We'll see the usage of `pos` in the next function.
+```
+int diskstreamer_seek(struct disk_stream* stream, int pos)
+{
+        stream->pos = pos;
+        return 0;
+}
+```
+- `int diskstreamer_seek(struct disk_stream* stream, int pos)`: function definition. it takes a (previously created) streamer and it's new `pos` value.
+- `        stream->pos = pos;`: accessing the `pos` member and setting it to `pos` passed by the user.
+- `        return 0;`: and return.
+### 6.2.3. `int diskstreamer_read(struct disk_stream* stream, void* out, int total);`
+This function will be used to read the data stream into the `out` pointer. We're supposed to pass it a `disk_stream`, the `out` pointer and the `total` amount of bytes. Here, we'll use the `stream->pos` value to read from `pos`.
+```
+int diskstreamer_read(struct disk_stream* stream, void* out, int total)
+{
+        int sector = stream->pos / PEACHOS_SECTOR_SIZE;
+        int offset = stream->pos % PEACHOS_SECTOR_SIZE;
+        char buf[PEACHOS_SECTOR_SIZE];
+
+        int res = disk_read_block(stream->disk, sector, 1, buf);
+        if(res < 0)
+        {
+                goto out;
+        }
+
+        int total_to_read = total > PEACHOS_SECTOR_SIZE ? PEACHOS_SECTOR_SIZE : total;
+        for(int i = 0; i < total_to_read; i++)
+        {
+                *(char*)out++ = buf[offset+i];
+        }
+        stream->pos += total_to_read;
+        if(total > PEACHOS_SECTOR_SIZE)
+        {
+                res = diskstreamer_read(stream, out, total-PEACHOS_SECTOR_SIZE);
+        }
+
+out:
+        return res;
+
+}
+```
+- `int diskstreamer_read(struct disk_stream* stream, void* out, int total)`: function definition we'll take a streamer object, a pointer and a `total` amount of bytes to read into the `out` pointer.
+- `        int sector = stream->pos / PEACHOS_SECTOR_SIZE;`: here we get the sector of the disk. if the value is, for example, `30`, then `30 / PEACHOS_SECTOR_SIZE` returns 0; if 513, then it's `513 / PEACHOS_SECTOR_SIZE` or 1.
+- `        int offset = stream->pos % PEACHOS_SECTOR_SIZE;`: now we get the offset of the bytes in relation to the sector. this will be used as our starting byte to read from. if `pos` is 30, then `30 % PEACHOS_SECTOR_SIZE` equals 30. and if `pos` 513, then `1`.
+	- in the second case it returns 1 because it's indeed the first byte of sector 1 (or second sector, counting from zero).
+- `        char buf[PEACHOS_SECTOR_SIZE];`: here we assign a buffer of `PEACHOS_SECTOR_SIZE` bytes to read into. we don't care if we're reading less than that, we need a buffer big enough as to not cause overflows.
+- `        int res = disk_read_block(stream->disk, sector, 1, buf);`: here we use the `disk_read_block` that we previously made. this will only read the `sector` calculated previously and store the data into `buf`.
+- `        if(res < 0)`: here we check if the read was successful.
+- `                goto out;`: if not, return the error.
+- `        int total_to_read = total > PEACHOS_SECTOR_SIZE ? PEACHOS_SECTOR_SIZE : total;`: this is a ternary assignation we first check if the `total` bytes to read is higher than the `PEACHOS_SECTOR_SIZE` and if so, assign the `PEACHOS_SECTOR_SIZE` to `total_to_read`. if lower, assign the total value.
+	- this is a recursive function. if we were to read 514 bytes, the function itself would run within itself. we'll see this in a bit.
+- `        for(int i = 0; i < total_to_read; i++)`: `for` loop to read the bytes.
+- `                *(char*)out++ = buf[offset+i];`: tricky pointer magic. here, we cast the `out` pointer into a `char` pointer and then dereferencing the pointer. after that, we assign the `buf[offset+i]` to the current pointer position and finally incrementing it. we assign `buf[offset+i]` because `offset+i` it's the byte that was asked from the function.
+	- `out++` and `++out` are different. `out++` increments after assignment and `++out` increments prior to assignment.
+- `        stream->pos += total_to_read;`: here we increment the `pos` by `total_to_read` bytes. this is because we've already read those bytes.
+- `        if(total > PEACHOS_SECTOR_SIZE)`: here we check again if `total` is higher than `PEACHOS_SECTOR_SIZE`. if so...
+- `                res = diskstreamer_read(stream, out, total-PEACHOS_SECTOR_SIZE);`: we call ourselves, but `total` is now subtracted `PEACHOS_TOTAL_SECTORS`. this changes the `total` variable for the next pass of the function, and will do until it becomes 0. this new call also modifies the `out` pointer directly (as we previously did), so there's no need to return `out`.
+- `out:`: `out` label.
+- `        return res;`: here we return `res`.
+That was a little bit of pointer magic. But we did it.
+### 6.2.4. `void diskstreamer_close(struct disk_stream* stream);`
+And when we're done using the stream, we can call this function to free the memory that it used.
+```
+void diskstreamer_close(struct disk_stream* stream)
+{
+        kfree(stream);
+}
+```
+- `void diskstreamer_close(struct disk_stream* stream)`: function definition. it takes a previously created `streamer` object.
+- `        kfree(stream);`: here we free the `stream` pointer.
+# 7. File Allocation Table (FAT)
+- It's a filesystem developed by Microsoft.
+- It consists of a series of clusters of data and a table that determines the state of the clusters.
+- The boot sector contains information about the filesystem.
+## 7.1. FAT16 Filesystem
+- This filesystem uses clusters to represent data, directories and files.
+- Each and every cluster uses a fixed amount of sectors which is specified in the boot sector.
+- Every file in tha FAT16 filesystem needs to use at least one cluster for its data. This means that a lot of storage is wasted for small files.
+- FAT16 can't store files larger than 2 gigabytes without large file support. With large file support, it can hold files up to 4 gigabytes.
+- It's very easy to implement.
+## 7.2. FAT16 Disk Layout
+
+| Name              | Size                                                                                     |
+| ----------------- | ---------------------------------------------------------------------------------------- |
+| Boot sector       | 512 bytes.                                                                               |
+| Reserved sectors. | fat_header.reserved_sectors \* 512*                                                      |
+| FAT 1             | fat_header.sectors_per_fat \* 512                                                        |
+| FAT 2 (Optional)  | fat_header.sectors_per_fat \* 512                                                        |
+| Root directory.   | fat_header.root_dir_entries \* sizeof(struct fat_directory_item) (**rounded if needed**) |
+| Data clusters.    | ...rest of disk.                                                                         |
+## 7.3. FAT16 Boot Sector
+The FAT16 boot sector is basically the Boot Parameter Block. Check the BIOS BPB entry on the misc notes.
+## 7.4. FAT16 File Allocation: Clusters in disk.
+- In the FAT table, we'll find that each cluster is represented as an entry of two bytes. Each two byte represent a cluster in the data region that is taken, free or in use.
+- Clusters can be chained together. An example would be a file larger than a cluster. It'd use one or more clusters, obviously.
+- When files use more than one cluster, the first cluster entry will too point to the next cluster in use and so on. The final cluster will contain the value `0xFFFF`, which means the end of the cluster chain.
+- The size of a cluster is determined by the values in the boot sector
+Example cluster table:
+
+| Entry zero | Entry one  | Entry two | Entry three |
+| ---------- | ---------- | --------- | ----------- |
+| 0x0003     | 0xFFFF     | 0xFFFF    | 0xFFFF      |
+| Entry four | Entry five | Entry six | Entry seven |
+| 0x0000     | 0x0000     | 0x0000    | 0x0000      |
+We have a cluster chain at entry zero. We know this because the first cluster entry has decimal 3. So, counting from zero, we can see that the final cluster would be located at entry three.
+\*Note: Cluster zero isn't used most of the time. FAT usually starts from cluster three and so forth.
+## 7.5. How are clusters accessed?
+If we wanted to, for example, access the third cluster in the FAT table, we'd take the
+
+`cluster index * size of cluster`
+
+If each cluster is 512 bytes in size and we wanted the data from the third cluster, we'd do: `3 * 512` and we'd have to access bytes 1536.
+## 7.6. FAT16 Root Directory
+- It's the top directory, like `C:\` or `/`.
+- Directories contain directory entries of a fixed size.
+## 7.7. FAT16 Directory Entry
+A typical directory entry would look like this:
+```
+struct fat_directory_item
+{
+	uint8_t filename[8];
+	uint8_t ext[3].
+	uint8_t attribute;
+	uint8_t reserved;
+	uint8_t creation_time_tenths_of_a_sec;
+	uint16_t creation_time;
+	uint16_t creation_date;
+	uint16_t last_access;
+	uint16_t high_16_bits_first_cluster;
+	uint16_t last_mod_time;
+	uint16_t last_mod_date;
+	uint16_t low_16_bits_first_cluster;
+	uint32_t filesize;
+} __attribute__((packed));
+```
+It's a lot of stuff, but everything is quite simple. FYI: the `attributes` item is used to declare the type of file (file or directory), read access, write access and so on.
+## 7.8 Iterating through directories
+- The boot sector contains the maximum number of root directory entries. We should not exceed this value when iterating through the root directory.
+- We know that when we finish iterating through the root directory or a subdirectory, because the first byte of our filename will be equal to zero.
+## 7.9. Directory entry attribute flags
+
+| Flag   | Description                        |
+| ------ | ---------------------------------- |
+| `0x01` | Read only.                         |
+| `0x02` | File hidden.                       |
+| `0x04` | System file. Do not move clusters. |
+| `0x08` | Volume label.                      |
+| `0x10` | This is a directory.               |
+| `0x20` | Archived.                          |
+| `0x40` | Device.                            |
+| `0x80` | Reserved.                          |
+## 7.10. Filenames and extensions.
+- The filename is 8 bytes wide and unused bytes are padded with spaces (`0x20`).
+- The extension is 3 bytes wide and unused bytes are padded with spaces (`0x20`).
+## 7.11. Clusters
+- Each cluster represents a fixed amount of sectors in the disk, linearly to each other.
+- The amount of sectors that represents a cluster is stored in the boot sector.
+- The data clusters section in the filesystem contains all the clusters that make up the subdirectories and file data of files throughout the FAT filesystem.
+## 7.12. Tips
+- Always use `__attribute__((packed))` when working with structures that are to be stored or read from the disk. The C compiler might try to optimize the structure and change it. We **DO NOT** want this when working with raw data to or from and the disk.
+- Learn to use GDB!
+
