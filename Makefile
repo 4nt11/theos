@@ -1,7 +1,7 @@
 FILES = ./build/kernel.asm.o ./build/kernel.o ./build/idt/idt.asm.o ./build/idt/idt.o ./build/memory/memory.o \
 	./build/io/io.asm.o ./build/memory/heap/heap.o ./build/memory/heap/kheap.o ./build/memory/paging/paging.o \
 	./build/memory/paging/paging.asm.o ./build/debug/debug.o ./build/disk/disk.o ./build/string/string.o \
-	./build/fs/pparser.o ./build/disk/streamer.o
+	./build/fs/pparser.o ./build/disk/streamer.o ./build/fs/file.o
 
 github: FLAGS += -fno-pie
 INCLUDES= -I./src
@@ -11,7 +11,10 @@ all: ./bin/kernel.bin ./bin/boot.bin
 	rm -rf ./bin/os.bin
 	dd if=./bin/boot.bin >> ./bin/os.bin
 	dd if=./bin/kernel.bin >> ./bin/os.bin
-	dd if=/dev/zero bs=512 count=100 >> ./bin/os.bin 
+	dd if=/dev/zero bs=1048576 count=16 >> ./bin/os.bin 
+	sudo mount -t vfat ./bin/os.bin ./bin/mountpoint
+	echo "hello world!" | sudo tee ./bin/mountpoint/helloworld.txt
+	sudo umount ./bin/mountpoint
 
 ./bin/kernel.bin: $(FILES)
 	i686-elf-ld -g -relocatable $(FILES) -o build/kernelfull.o
@@ -61,6 +64,9 @@ all: ./bin/kernel.bin ./bin/boot.bin
 
 ./build/disk/streamer.o: ./src/disk/streamer.c
 	i686-elf-gcc $(INCLUDES) -I./src/streamer/ $(FLAGS) -std=gnu99 -c ./src/disk/streamer.c -o ./build/disk/streamer.o
+
+./build/fs/file.o: ./src/fs/file.c
+	i686-elf-gcc $(INCLUDES) -I./src/file/ $(FLAGS) -std=gnu99 -c ./src/fs/file.c -o ./build/fs/file.o
 
 # not working as of right now.
 ./build/debug/debug.o: ./src/debug/debug.c

@@ -25,4 +25,10 @@
 // disk sector size
 #define PEACHOS_SECTOR_SIZE 		512
 
+// max fs
+#define PEACHOS_MAX_FILESYSTEMS 	12
+
+// max open files
+#define PEACHOS_MAX_FILEDESCRIPTORS 	512
+
 #endif

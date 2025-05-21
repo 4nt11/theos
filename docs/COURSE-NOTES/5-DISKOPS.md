@@ -804,4 +804,499 @@ It's a lot of stuff, but everything is quite simple. FYI: the `attributes` item 
 ## 7.12. Tips
 - Always use `__attribute__((packed))` when working with structures that are to be stored or read from the disk. The C compiler might try to optimize the structure and change it. We **DO NOT** want this when working with raw data to or from and the disk.
 - Learn to use GDB!
+# 8. Starting our FAT Filesystem.
+To begin creating our FAT filesystem, we first need to modify the bootloader (`boot.asm`).
+## 8.1. `boot.asm`
+The added code is just added variables in Assembly.  ~~Not actually variables, but you understand~~- We did make an important change, which is deleting the `times db 33` we had before. We don't need that anymore, because we'll implement a proper BPB; which is also our FAT table.
+```
+ORG 0x7c00
+BITS 16
+
+CODE_SEG equ gdt_code - gdt_start
+DATA_SEG equ gdt_data - gdt_start
+
+jmp short start
+nop
+
+; FAT16 Header
+OEMIdentifier           db 'PEACHOS '
+BytesPerSector          dw 0x200
+SectorsPerCluster       db 0x80
+ReservedSectors         dw 200
+FATCopies               db 0x02
+RootDirEntries          dw 0x40
+NumSectors              dw 0x00
+MediaType               db 0xF8
+SectorsPerFAT           dw 0x100
+SectorsPerTrack         dw 0x20
+NumberOfHeads           dw 0x40
+HiddenSectors           dd 0x00
+SectorsBig              dd 0x773544
+
+; Entended BPB
+DriveNumber             db 0x80
+WinNTBit                db 0x00
+Signature               db 0x29
+VolumeID                dd 0xD105
+VolumeIDString          db 'PEACHOS BOO'
+SystemIDString          db 'FAT16   '
+```
+- `jmp short start`: start of the BPB. we immediately make a `jump short` into the `start` label. the BPB isn't meant to be executed.
+- `nop`: as per BPB, we require a `nop` instruction here.
+- `OEMIdentifier           db 'PEACHOS '`: this is the OEM Identifier. we can put whatever we want here. there are some old DOS drivers that only work with some OEM ids, but those are far gone. this is an 8 byte value padded with spaces. that is, if we use less that 8 bytes, we must add the spaces.
+- `BytesPerSector          dw 0x200`: these is the amount of bytes per *logical* (not physical) sectors. I emphasize *logical* because this parameter doesn't change the physical sectors byte amount, only the logical. that is, what the OS sees. `0x200` is 512 bytes.
+- `SectorsPerCluster       db 0x80`: amount of sectors per cluster. we use one of the allowed values `0x80` or 128 sectors per cluster.
+- `ReservedSectors         dw 200`: these are reserved sectors, i.e., sectors to be ignored by the kernel. keep in mind that these sectors must be manually ignored.
+- `FATCopies               db 0x02`: number of FAT table copies.
+- `RootDirEntries          dw 0x40`: number of maximum root directory entries in the FAT12 or FAT16 filesystem. this value must be divisible by 16. in our case, we use `0x40` or 64, which is indeed divisible by 16.
+- `NumSectors              dw 0x00`: logical sectors. we won't use this for now.
+- `MediaType               db 0xF8`: this is the media descriptor. `0xF8` describes a partition.
+- `SectorsPerFAT           dw 0x100`: these are the amount of sectors per FAT. we'll use `0x100` or 256.
+- `SectorsPerTrack         dw 0x20`: these are the sectors per track. 
+- `NumberOfHeads           dw 0x40`: and these are the number of heads. it's related to CHS geometry, as the entry above.
+- `HiddenSectors           dd 0x00`: these are the hidden sectors. literally just that.
+- `SectorsBig              dd 0x773544`: since we aren't using the `NumSectors`, we must set `SectorsBig`, which is the total amount of sectors in the disk.
+- `; Entended BPB`: separator. from now on, we'll see the EBPB or Extended BIOS Parameter Block.
+- `DriveNumber             db 0x80`: this is the drive number. `0x80` means "first physical disk".
+- `WinNTBit                db 0x00`: this byte is resereved.
+- `Signature               db 0x29`: this is the signature. it must be `0x29`.
+- `VolumeID                dd 0xD105`: this is the serial number of the drive.
+- `VolumeIDString          db 'PEACHOS BOO'`: this is the name or label of the drive. it must be 11 bytes, and if less than 11 bytes are used, you need to pad the rest with spaces.
+- `SystemIDString          db 'FAT16   '`:  this is the file system type. this is an 8 byte value and it must be padded with spaces.
+
+And that's that! 
+## 9.2. `Makefile`
+We also modified the `Makefile` a little bit.
+```
+all: ./bin/kernel.bin ./bin/boot.bin
+        ...
+        dd if=/dev/zero bs=1048576 count=16 >> ./bin/os.bin
+```
+- `dd if=/dev/zero bs=1048576 count=16 >> ./bin/os.bin`: we changed the block size to 1048576 (1 megabyte) and the count to 16.
+# 10. Understanding VFS or Virtual File System.
+- The VFS layer allows a kernel to support an infinite amount of filesystems.
+- It allows us to abstract complicated low level functions with higher, simpler interfaces.
+- It also allows the kernel to load and unload filesystem functionality at will.
+- The VFS layer is supposed to be used by all other filesystems.
+## 10.1. What happens when we insert a disk?
+- The kernel checks for its filesystems and then asks the drive if it has a filesystem it can handle. This process is called resolving the filesystem.
+- If the kernel has functionality for that filesystem, it will then load that functionality and binds it to itself.
+- Userspace programs use syscalls to the kernel to interact with the drives. There is no direct interaction between the user and the hardware.
+Take the following example:
+```
+-> Userspace executes fopen("0:/test.txt", "r") 
+-> The kernel then parses the call 
+-> Path parser returns path root.
+-> disk_read then talks to the drive 
+-> the drive calls the `fopen` FAT32 function and returns a file descriptor.
+```
+# 11. Implementing the VFS Core Functionality.
+## 11.1. `config.h`
+We defined some magic numbers for convenience an readability.
+```
+// max fs
+#define PEACHOS_MAX_FILESYSTEMS         12
+
+// max open files
+#define PEACHOS_MAX_FILEDESCRIPTORS     512
+```
+- `#define PEACHOS_MAX_FILESYSTEMS         12`: we've added a max filesystem number. it's completely arbitrary and can be anything we want.
+- `#define PEACHOS_MAX_FILEDESCRIPTORS     51`: and a maximum amount of open files in our system. as before, this is arbitrary and can be whatever we want.
+## 11.2. `file.h`
+sometext
+```
+#ifndef FILE_H
+#define FILE_H
+#include "pparser.h"
+
+typedef unsigned int FILE_SEEK_MODE;
+enum
+{
+        SEEK_SET,
+        SEEK_CUR,
+        SEEK_END,
+};
+
+typedef unsigned int  FILE_MODE;
+enum
+{
+        FILE_MODE_READ,
+        FILE_MODE_WRITE,
+        FILE_MODE_APPEND,
+        FILE_MODE_INVALID
+};
+
+struct disk;
+typedef void*(*FS_OPEN_FUNCTION)(struct disk* disk, struct path_part* path, FILE_MODE mode);
+typedef int (*FS_RESOLVE_FUNCTION)(struct disk* disk);
+
+struct filesystem
+{
+        // fs should return 0 from resolve if the disk is using its fs.
+        FS_RESOLVE_FUNCTION resolve;
+        FS_OPEN_FUNCTION fopen;
+        char name[20];
+};
+
+struct file_descriptor
+{
+        int index;
+        struct filesystem* filesystem;
+        // private data for internal fd
+        void* private;
+        // disk the fd is used on
+        struct disk* disk;
+};
+
+void fs_init();
+int fopen(const char* filename, const char* mode);
+void fs_insert_filesystem(struct filesystem* filesystem);
+struct filesystem* fs_resolve(struct disk* disk);
+
+#endif
+```
+- `#include "pparser.h"`: we include `pparser.h` to use it later.
+- `typedef unsigned int FILE_SEEK_MODE;`: here we define a type `FILE_SEEK_MODE`. it will represent the start of the file, the current relative position or the end of the file.
+- `enum`: and with the `enum` keyword, we define the values for `FILE_SEEK_MODE`.
+- `        SEEK_SET,`: for the start of the file,
+- `        SEEK_CUR,`: for the current relative position and
+- `        SEEK_END,`: for the end of the file.
+- `typedef unsigned int  FILE_MODE;`: now we define the different file modes in which a file descriptor can be opened with.
+- `enum`: again, we define the values for `FILE_MODE`.
+- `        FILE_MODE_READ,`: for read mode,
+- `        FILE_MODE_WRITE,`: for write mode,
+- `        FILE_MODE_APPEND,`: for append (add characters after EOF) and
+- `        FILE_MODE_INVALID`: for any invalid mode.
+- `struct disk;`: here we define a `disk` struct which is globally accessible.
+- `typedef void*(*FS_OPEN_FUNCTION)(struct disk* disk, struct path_part* path, FILE_MODE mode);`: this is a function pointer that takes a `disk`, a `path_part` pointer to a file and a `file_mode`.
+	- a function pointer is used to point to a function that will be defined by the programmer later on. check the Function Pointers misc page for more.
+- `typedef int (*FS_RESOLVE_FUNCTION)(struct disk* disk);`: another function pointer that will take a `disk` function. this resolve function is used to resolve the filesystem implementation as per the filesystem check.
+- `struct filesystem`: here we define a `filesystem` struct, which will be used by all the fs drivers that will use this VFS interface to interact with files.
+- `        FS_RESOLVE_FUNCTION resolve;`: the struct must contain a function to resolve the filesystem and be able (or not) to recognize the filesystem as theirs.
+- `        FS_OPEN_FUNCTION fopen;`: it'll also have a `fopen` function defined by the driver itself.
+- `        char name[20];`: and a name of the filesystem, like FAT or EXT.
+- `struct file_descriptor`: now we define the `file_descriptor` struct. all the files in our OS will fall under this struct. each filesystem driver will use this struct to return the data read from the filesystem.
+- `        int index;`: here we have an index, or a position in the disk in which this file is in.
+- `        struct filesystem* filesystem;`: the `filesystem` the file resides on,
+- `        void* private;`: a pointer to private data, if any.
+- `        struct disk* disk;`: and a `disk` struct in which the file is in.
+- `void fs_init();`: function prototype. we'll see this later.
+- `int fopen(const char* filename, const char* mode);`: function prototype. we'll see this later.
+- `void fs_insert_filesystem(struct filesystem* filesystem);`: function prototype. we'll see this later.
+- `struct filesystem* fs_resolve(struct disk* disk);`: function prototype. we'll see this later.
+This is the basis of our VFS layer. As mentioned before, it'll we used by all other filesystems to interface with the OS.
+## 11.3. `file.c`
+Here's the base implementation. There's still a lot to be done, but we'll get there when we get there.
+```
+#include "file.h"
+#include "status.h"
+#include "kernel.h"
+#include "memory/memory.h"
+#include "memory/heap/kheap.h"
+#include "config.h"
+
+struct filesystem* filesystems[PEACHOS_MAX_FILESYSTEMS];
+struct file_descriptor* file_descriptors[PEACHOS_MAX_FILEDESCRIPTORS];
+
+static struct filesystem** fs_get_free_filesystem()
+{
+        int i = 0;
+        for (i = 0; i < PEACHOS_MAX_FILESYSTEMS; i++)
+        {
+                return &filesystems[i];
+        }
+
+        return 0;
+}
+
+void fs_insert_filesystem(struct filesystem *filesystem)
+{
+        struct filesystem** fs;
+        fs = fs_get_free_filesystem();
+        if(!fs)
+        {
+                print("no fs!");
+                while(1);
+        }
+        *fs = filesystem;
+}
+
+static void fs_static_load()
+{
+        //fs_insert_filesystem(fat16_init());
+}
+
+void fs_load()
+{
+        memset(filesystems, 0, sizeof(filesystems));
+        fs_static_load();
+}
+
+void fs_init()
+{
+        memset(file_descriptors, 0, sizeof(file_descriptors));
+        fs_load();
+}
+
+static int file_new_descriptor(struct file_descriptor** desc_out)
+{
+        int res = -ENOMEM;
+        for (int i = 0; i < PEACHOS_MAX_FILEDESCRIPTORS; i++)
+        {
+                if (file_descriptors[i] == 0)
+                {
+                        struct file_descriptor* desc = kzalloc(sizeof(struct file_descriptor));
+                        desc->index = i+1;
+                        file_descriptors[i] = desc;
+                        *desc_out = desc;
+                        res = 0;
+                        break;
+                }
+        }
+        return res;
+}
+
+static struct file_descriptor* file_get_descriptor(int fd)
+{
+        if(fd <= 0 || fd >= PEACHOS_MAX_FILEDESCRIPTORS)
+        {
+                return 0;
+        }
+        // descriptors start at 1
+        int index = fd - 1;
+        return file_descriptors[index];
+}
+
+struct filesystem* fs_resolve(struct disk* disk)
+{
+        struct filesystem* fs = 0;
+        for (int i = 0; i < PEACHOS_MAX_FILESYSTEMS; i++)
+        {
+                if (filesystems[i] != 0 && filesystems[i]->resolve(disk) == 0)
+                {
+                        fs = filesystems[i];
+                        break;
+                }
+        }
+
+        return fs;
+}
+
+int fopen(const char* filename, const char* mode)
+{
+        return -EIO;
+}
+```
+We will the read the code as it would execute in memory. It's a bit much, but not complex. First, we'll go over the initialization code. Then, we'll go over the others.
+### 11.3.0. Initial definitions.
+Before jumping into each function, we need to see the initial structs that are defined by the file.
+```
+struct filesystem* filesystems[PEACHOS_MAX_FILESYSTEMS];
+struct file_descriptor* file_descriptors[PEACHOS_MAX_FILEDESCRIPTORS];
+```
+- `struct filesystem* filesystems[PEACHOS_MAX_FILESYSTEMS];`: here we define the general `filesystems` structure. it's configured to be of `PEACHOS_MAX_FILESYSTEMS` or 12.
+- `struct file_descriptor* file_descriptors[PEACHOS_MAX_FILEDESCRIPTORS];`: and the general `file_descriptors` structure, which is `PEACHOS_MAX_FILEDESCRIPTORS` or 512.
+### 11.3.1. void fs_init()
+```
+void fs_init()
+{
+        memset(file_descriptors, 0, sizeof(file_descriptors));
+        fs_load();
+}
+```
+- `void fs_init()`: `fs_init` function. it'll setup the filesystems as it executes; initially, it cleans up `file_descriptors`.
+- `        memset(file_descriptors, 0, sizeof(file_descriptors));`: here we `memset` the initial `file_descriptors` to zero.
+- `        fs_load();`: and we call `fs_load`.
+### 11.3.2. void fs_load()
+```
+void fs_load()
+{
+        memset(filesystems, 0, sizeof(filesystems));
+        fs_static_load();
+}
+```
+- `void fs_load()`: `fs_load` function. here we `memset` the `filesystems` structure and continue executing.
+- `        memset(filesystems, 0, sizeof(filesystems));`: `memset` call to setup `filesystems` to 0.
+- `        fs_static_load();`: and we now call `fs_static_load`.
+### 11.3.3. static void fs_static_load()
+```
+static void fs_static_load()
+{
+        //fs_insert_filesystem(fat16_init());
+}
+```
+- `static void fs_static_load()`: function definition. for now, it doesn't do much.
+- `        //fs_insert_filesystem(fat16_init());`: we call `fs_insert_filesystem` with `fat16_init` function, which would return a `filesystem` structure. the function hasn't been implemented yet, to its commented out for now.
+### 11.3.4. void fs_insert_filesystem(struct filesystem *filesystem)
+```
+void fs_insert_filesystem(struct filesystem *filesystem)
+{
+        struct filesystem** fs;
+        fs = fs_get_free_filesystem();
+        if(!fs)
+        {
+                print("no fs!");
+                while(1);
+        }
+        *fs = filesystem;
+}
+```
+- `void fs_insert_filesystem(struct filesystem *filesystem)`: function definition. it'll take a `filesystem` structure and then insert them into the `filesystems` structure.
+- `        struct filesystem** fs;`: here we define a pointer to a pointer to a `filesystem` structure.
+- `        fs = fs_get_free_filesystem();`: here we get the value address returned by the `fs_get_free_filesystem`. we'll see it later.
+- `        if(!fs)`: here we check if the `fs` pointer is null. if so...
+- `                print("no fs!");`: we panic!
+- `                while(1);`: but we don't have a `panic` function yet. so the system just enters an unescapable `while` loop.
+- `        *fs = filesystem;`: if not panicking, we dereference the `*fs` pointers (which in turn accesses the `filesystems` structure defined at the beginning of the file) and sets its value to `filesystem`.
+### 11.3.5. static struct filesystem** fs_get_free_filesystem()
+```
+static struct filesystem** fs_get_free_filesystem()
+{
+        int i = 0;
+        for (i = 0; i < PEACHOS_MAX_FILESYSTEMS; i++)
+        {
+                if(filesystems[i] == 0)
+                {
+                        return &filesystems[i];
+                }
+        }
+        return 0;
+}
+```
+- `static struct filesystem** fs_get_free_filesystem()`: this function will return the memory address value of the first NULL pointer.
+- `        int i = 0;`: initial counter.
+- `        for (i = 0; i < PEACHOS_MAX_FILESYSTEMS; i++)`: `for` loop that will run 12 times.
+- `               if(filesystems[i] == 0)`: here we check if the `filesystems[i]` is NULL. if so...
+- `                       return &filesystems[i];`: we access the memory value of the `filesystems[i]` and return it to the caller, which is the function we saw before.
+- `        return 0;`: and if anything fails, we return 0.
+And that's it! Pointers get a little bit tricky, but you'll get the hang of it. Now, we need to read the helper functions.
+### 11.3.6. `static int file_new_descriptor(struct file_descriptor** desc_out)`
+```
+static int file_new_descriptor(struct file_descriptor** desc_out)
+{
+        int res = -ENOMEM;
+        for (int i = 0; i < PEACHOS_MAX_FILEDESCRIPTORS; i++)
+        {
+                if (file_descriptors[i] == 0)
+                {
+                        struct file_descriptor* desc = kzalloc(sizeof(struct file_descriptor));
+                        desc->index = i+1;
+                        file_descriptors[i] = desc;
+                        *desc_out = desc;
+                        res = 0;
+                        break;
+                }
+        }
+        return res;
+}
+```
+- `static int file_new_descriptor(struct file_descriptor** desc_out)`: this function will be used to create file descriptors.
+- `        int res = -ENOMEM;`: here we create the initial `res` value.
+- `        for (int i = 0; i < PEACHOS_MAX_FILEDESCRIPTORS; i++)`: here we start enumerating all the file descriptors.
+- `                if (file_descriptors[i] == 0)`: here we check if `file_descriptors[i]` is NULL or unset.
+- `                        struct file_descriptor* desc = kzalloc(sizeof(struct file_descriptor));`: here we create the initial structure that will be assigned to the file descriptors, allocate memory and zero it out.
+- `                        desc->index = i+1;`: here we increase the `index` value, which would become 1.
+- `                        file_descriptors[i] = desc;`: and we assign the value of `desc` to the found NULL descriptor.
+- `                        *desc_out = desc;`: and we modify the descriptor passed to us to point to the newly created file descriptor.
+- `                        res = 0;`: and we set `res` to 0.
+- `                        break;`: and we break the loop.
+- `        return res;`: and return `res`.
+### 11.3.7. `static struct file_descriptor* file_get_descriptor(int fd)`
+```
+static struct file_descriptor* file_get_descriptor(int fd)
+{
+        if(fd <= 0 || fd >= PEACHOS_MAX_FILEDESCRIPTORS)
+        {
+                return 0;
+        }
+        // descriptors start at 1, but arrays values start at 0.
+        int index = fd - 1;
+        return file_descriptors[index];
+}
+```
+- `static struct file_descriptor* file_get_descriptor(int fd)`: this function will the return a file descriptor.
+- `        if(fd <= 0 || fd >= PEACHOS_MAX_FILEDESCRIPTORS)`: here we check if the `fd` value passed to us is zero or is a value higher than the allowed file descriptors.
+- `                return 0;`: and we return zero if any of the conditions are met.
+- `        int index = fd - 1;`: here we create an index value to access the `fd`. if `fd` is one, then we need to access the previous value (`0`) to access the `fd` 1.
+- `        return file_descriptors[index];`: and we return the file descriptor.
+### 11.3.8. `struct filesystem* fs_resolve(struct disk* disk)`
+```
+struct filesystem* fs_resolve(struct disk* disk)
+{
+        struct filesystem* fs = 0;
+        for (int i = 0; i < PEACHOS_MAX_FILESYSTEMS; i++)
+        {
+                if (filesystems[i] != 0 && filesystems[i]->resolve(disk) == 0)
+                {
+                        fs = filesystems[i];
+                        break;
+                }
+        }
+
+        return fs;
+}
+```
+- `struct filesystem* fs_resolve(struct disk* disk)`: this function will use the `resolve` function pointer to get the fs type.
+- `        struct filesystem* fs = 0;`: here we make a `fs` pointer to `filesystem` structure to zero (null).
+- `        for (int i = 0; i < PEACHOS_MAX_FILESYSTEMS; i++)`: we start a loop that will run at most 12 times.
+- `                if (filesystems[i] != 0 && filesystems[i]->resolve(disk) == 0)`: here we make two checks: first we check if the `filesystems[i]` is NULL and if the execution of the `resolve` function pointer is zero. if so...
+- `                        fs = filesystems[i];`: we set `fs` to `filesystems[i]`.
+- `                        break;`: and break.
+- `        return fs;`: and we return the `fs` to the caller.
+### 11.3.9. `int fopen(const char* filename, const char* mode)`
+```
+int fopen(const char* filename, const char* mode)
+{
+        return -EIO;
+}
+```
+- `int fopen(const char* filename, const char* mode)`: we create the skeleton for our `fopen` function.
+- `        return -EIO;`: we haven't implemented it yet, so we return `-EIO`.
+## 11.4. `disk.h`
+sometext
+```
+...
+struct disk
+{
+        PEACHOS_DISK_TYPE type;
+        int sector_size;
+        struct filesystem* filesystem;
+};
+...
+```
+- `struct disk`: 
+- ...
+- `        struct filesystem* filesystem;`: we added the `filessytem` structure to our `disk` structure, as a way to identify the disk.
+## 11.5. `disk.c`
+sometext
+```
+void disk_search_and_init()
+{
+        memset(&disk, 0, sizeof(disk));
+        disk.type = PEACHOS_DISK_TYPE_REAL;
+        disk.sector_size = PEACHOS_SECTOR_SIZE;
+        disk.filesystem = fs_resolve(&disk);
+}
+```
+- `void disk_search_and_init()`: 
+- `        disk.filesystem = fs_resolve(&disk);`: here we make a call to the function `fs_resolve`, which in turn will call the `filesystem->FS_RESOLVE_FUNCTION` function pointer defined in the `file.h` header file
+## 11.6. `Makefile`
+sometext
+```
+FILES = ... ./build/fs/file.o
+
+all: ./bin/kernel.bin ./bin/boot.bin
+	...
+	sudo mount -t vfat ./bin/os.bin ./bin/mountpoint
+        echo "hello world!" | sudo tee ./bin/mountpoint/helloworld.txt
+        sudo umount ./bin/mountpoint
+
+./build/fs/file.o: ./src/fs/file.c
+        i686-elf-gcc $(INCLUDES) -I./src/file/ $(FLAGS) -std=gnu99 -c ./src/fs/file.c -o ./build/fs/file.o
+```
+
+- ` 	sudo mount -t vfat ./bin/os.bin ./bin/mountpoint`: here, we mount the `os.bin` file into the `mountpoint`. we can do this because Linux recognizes the `os.bin` as a valid FAT16 partition.
+- `       echo "hello world!" | sudo tee ./bin/mountpoint/helloworld.txt`: here we write something to the disk. it doesn't matter what it is, we just want to have placeholder data for us to read later on.
+- `       sudo umount ./bin/mountpoint`: and here we unmount the disk.
+This is definitely not needed, but it'll help us to later on check if our implementations are working or not.
 
