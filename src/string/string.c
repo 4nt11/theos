@@ -55,6 +55,7 @@ char* strcpy(char* dest, const char* src)
 		src += 1;
 		dest += 1;
 	}
+	*dest = 0x00;
 	return res;
 }
 
