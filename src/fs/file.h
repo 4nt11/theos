@@ -27,7 +27,7 @@ struct filesystem
 {
 	// fs should return 0 from resolve if the disk is using its fs.
 	FS_RESOLVE_FUNCTION resolve;
-	FS_OPEN_FUNCTION fopen;
+	FS_OPEN_FUNCTION open;
 	char name[20];
 };
 

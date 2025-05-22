@@ -1,7 +1,7 @@
 FILES = ./build/kernel.asm.o ./build/kernel.o ./build/idt/idt.asm.o ./build/idt/idt.o ./build/memory/memory.o \
 	./build/io/io.asm.o ./build/memory/heap/heap.o ./build/memory/heap/kheap.o ./build/memory/paging/paging.o \
 	./build/memory/paging/paging.asm.o ./build/debug/debug.o ./build/disk/disk.o ./build/string/string.o \
-	./build/fs/pparser.o ./build/disk/streamer.o ./build/fs/file.o
+	./build/fs/pparser.o ./build/disk/streamer.o ./build/fs/file.o ./build/fs/fat/fat16.o
 
 github: FLAGS += -fno-pie
 INCLUDES= -I./src
@@ -66,7 +66,10 @@ all: ./bin/kernel.bin ./bin/boot.bin
 	i686-elf-gcc $(INCLUDES) -I./src/streamer/ $(FLAGS) -std=gnu99 -c ./src/disk/streamer.c -o ./build/disk/streamer.o
 
 ./build/fs/file.o: ./src/fs/file.c
-	i686-elf-gcc $(INCLUDES) -I./src/file/ $(FLAGS) -std=gnu99 -c ./src/fs/file.c -o ./build/fs/file.o
+	i686-elf-gcc $(INCLUDES) -I./src/fs/ $(FLAGS) -std=gnu99 -c ./src/fs/file.c -o ./build/fs/file.o
+
+./build/fs/fat/fat16.o: ./src/fs/fat/fat16.c
+	i686-elf-gcc $(INCLUDES) -I./src/fs/ -I./src/fs/fat/ $(FLAGS) -std=gnu99 -c ./src/fs/fat/fat16.c -o ./build/fs/fat/fat16.o
 
 # not working as of right now.
 ./build/debug/debug.o: ./src/debug/debug.c
