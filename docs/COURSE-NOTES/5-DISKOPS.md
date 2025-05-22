@@ -1424,21 +1424,209 @@ FILES = ... ./build/fs/fat/fat16.o
 Although we have done this before, here we add a new include. Well, not new, but we include the `src/fs` folder instead of just `src/fs/fat`.
 
 And that's it for now!
-
 # 12. Implementing FAT16 Structures
 ### 12.1.1. Constants
-### 12.1.1. `struct fat_header_extended`
-### 12.1.1. `struct fat_header`
-### 12.1.1. `struct fat_h`
-### 12.1.1. `struct fat_directory_item`
-### 12.1.1. `struct fat_directory`
-### 12.1.1. `struct fat_item`
-### 12.1.1. `struct fat_item_descriptor`
-### 12.1.1. `struct fat_private`
+```
+#define PEACHOS_FAT16_SIGNATURE 0x29
+#define PEACHOS_FAT16_FAT_ENTRY_SIZE 0x02
+#define PEACHOS_FAT16_BAD_SECTOR 0xFF7
+#define PEACHOS_FAT16_UNUSED 0x00
 
-# 13. Implementing the FAT16 resolver function
-# 13.1.1. `static void fat16_init_private(struct disk* disk, struct fat_private* private)`
-### 13.1.2. `int fat16_sector_to_absolute(struct disk* disk, int sector)`
-### 13.1.3. `int fat16_get_total_items_for_directory(struct disk* disk, uint32_t directory_start_sector)`
-### 13.1.4. `int fat16_get_root_directory(struct disk* disk, struct fat_private* fat_private, struct fat_directory* directory)`
+typedef unsigned int FAT_ITEM_TIPE;
+#define FAT_ITEM_TYPE_DIRECTORY 0
+#define FAT_ITEM_TYPE_FILE 1
 
+// fat dir entry attribute bitmasks
+#define FAT_FILE_READ_ONLY 0x01
+#define FAT_FILE_HIDDEN 0x02
+#define FAT_FILE_SYSTEM 0x04
+#define FAT_FILE_VOLUME_LABEL 0x08
+#define FAT_FILE_SUBDIRECTORY 0x10
+#define FAT_FILE_ARCHIVED 0x20
+#define FAT_FILE_DEVICE 0x40
+#define FAT_FILE_RESERVED 0x80
+```
+- `#define PEACHOS_FAT16_SIGNATURE 0x29`: this is the FAT signature of our filesystem.
+- `#define PEACHOS_FAT16_FAT_ENTRY_SIZE 0x02`: this is the size of each FAT entry in bytes.
+- `#define PEACHOS_FAT16_BAD_SECTOR 0xFF7`: this is a cluster value that represents a bad sector.
+- `#define PEACHOS_FAT16_UNUSED 0x00`: this is a cluster value that represents an unused sector.
+- `typedef unsigned int FAT_ITEM_TIPE;`: here we define an item type. we'll use it later on to define if an item is a directory or an item.
+- `#define FAT_ITEM_TYPE_DIRECTORY 0`: we'll use this to define a directory.
+- `#define FAT_ITEM_TYPE_FILE 1`: and we'll use this to define a file.
+- `#define FAT_FILE_READ_ONLY 0x01`: this attribute represents a read only file.
+- `#define FAT_FILE_HIDDEN 0x02`: this attribute represents a hidden file.
+- `#define FAT_FILE_SYSTEM 0x04`: this attribute represents a system file and it must not be moved or deleted.
+- `#define FAT_FILE_VOLUME_LABEL 0x08`: this attribute represents a volume label.
+- `#define FAT_FILE_SUBDIRECTORY 0x10`: this attribute represents a subdirectory.
+- `#define FAT_FILE_ARCHIVED 0x20`: this attribute represents a backed up (archived) file.
+- `#define FAT_FILE_DEVICE 0x40`: this attribute represents a device file and it must not be changed.
+- `#define FAT_FILE_RESERVED 0x80`: this attribute represents the reserved clusters/sectors in disk.
+### 12.1.2. `struct fat_header_extended`
+```
+struct fat_header_extended
+{
+        uint8_t drive_number;
+        uint8_t win_nt_bit;
+        uint8_t signature;
+        uint32_t volume_id;
+        uint8_t volume_id_string[11];
+        uint8_t systemd_id_string[8];
+} __attribute__((packed));
+```
+- `struct fat_header_extended`: this structure is a C implementation of the extended BPB. check `boot.asm`.
+- `        uint8_t drive_number;`: this is the drive number.
+- `        uint8_t win_nt_bit;`: this is the WIN NT bit.
+- `        uint8_t signature;`: this is the signature of the FS.
+- `        uint32_t volume_id;`: this is the volume id.
+- `        uint8_t volume_id_string[11];`: this is the volume ID string.
+- `        uint8_t systemd_id_string[8];`: and this is the system ID, `FAT16   `.
+- `} __attribute__((packed));`: we pack this structure because it'll be used in the disk.
+### 12.1.3. `struct fat_header`
+```
+struct fat_header
+{
+        uint8_t short_jmp_ins[3];
+        uint8_t oem_identifier[8];
+        uint16_t bytes_per_sector;
+        uint8_t sectors_per_cluster;
+        uint16_t reserved_sectors;
+        uint8_t fat_copies;
+        uint16_t root_dir_entries;
+        uint16_t number_of_sectors;
+        uint8_t media_type;
+        uint16_t sectors_per_fat;
+        uint16_t sectors_per_track;
+        uint16_t number_of_heads;
+        uint32_t hidden_sectors;
+        uint32_t sectors_big;
+} __attribute__((packed));
+```
+- `struct fat_header`: as before, this is a C implementation of the BPB. check `boot.asm`.
+- `        uint8_t short_jmp_ins[3];`: this is the `jump short main` instruction.
+- `        uint8_t oem_identifier[8];`: this is the OEMIdentifier.
+- `        uint16_t bytes_per_sector;`: this are the bytes per logical sector.
+- `        uint8_t sectors_per_cluster;`: this is the sectors per cluster (unused).
+- `        uint16_t reserved_sectors;`: this is the amount of reserved sectors we have.
+- `        uint8_t fat_copies;`: this is the amount of FAT copies that exist in the FAT table.
+- `        uint16_t root_dir_entries;`: this is the amount of root directory entries.
+- `        uint16_t number_of_sectors;`: this is number of logical sectors we have.
+- `        uint8_t media_type;`: this is the media type.
+- `        uint16_t sectors_per_fat;`: this is the number of sectors per FAT table.
+- `        uint16_t sectors_per_track;`: this is the number of sectors per track.
+- `        uint16_t number_of_heads;`: this is the number of drive heads.
+- `        uint32_t hidden_sectors;`: this is the amount of hidden or reserved sectors.
+- `        uint32_t sectors_big;`: this is the amount of sectors we actually have.
+- `} __attribute__((packed));`: and we pack it up.
+### 12.1.4. `struct fat_h`
+```
+struct fat_h
+{
+        struct fat_header primary_header;
+        union fat_h_e
+        {
+                struct fat_header_extended extended_header;
+        } shared;
+};
+```
+- `struct fat_h`: this is the internal representation that we'll use of the FAT headers.
+- `        struct fat_header primary_header;`: this is the BPB.
+- `        union fat_h_e`: here we make a union. a union is a special data type that will allow us to store different data types in the same memory location. in practice, it's similar to a structure. this union will only be used if an EBPB is found.
+- `                struct fat_header_extended extended_header;`: here we set the extended BPB as a member of this union.
+- `        } shared;`: and `shared` is the name of the union. it's the member name that we'll use to access it.
+### 12.1.5. `struct fat_directory_item`
+```
+struct fat_directory_item
+{
+        uint8_t filename[8];
+        uint8_t ext[3];
+        uint8_t attribute;
+        uint8_t reserved;
+        uint8_t creation_time_tenths_of_a_sec;
+        uint16_t creation_time;
+        uint16_t creation_date;
+        uint16_t last_access;
+        uint16_t high_16_bits_first_cluster;
+        uint16_t last_mod_time;
+        uint16_t last_mod_date;
+        uint16_t low_16_bits_first_cluster;
+        uint32_t filesize;
+} __attribute__((packed));
+```
+- `struct fat_directory_item`: this structure will represent each entry in the FAT table, be it a directory or a file.
+- `        uint8_t filename[8];`: filename.
+- `        uint8_t ext[3];`: extension of the file.
+- `        uint8_t attribute;`: attributes (look above)
+- `        uint8_t reserved;`: this is a reserved bit, unused.
+- `        uint8_t creation_time_tenths_of_a_sec;`: this is the creation time in miliseconds.
+- `        uint16_t creation_time;`: this is the time itself.
+- `        uint16_t creation_date;`: this is the creation date.
+- `        uint16_t last_access;`: this is the last access date.
+- `        uint16_t high_16_bits_first_cluster;`: this are the high 16 bits of the cluster. if it's a directory, it'll represent the next entry in the directory structure. if it's a file, it'll have cluster data, position, etc.
+- `        uint16_t last_mod_time;`: this is the last modification time.
+- `        uint16_t last_mod_date;`: this is the last modification date.
+- `        uint16_t low_16_bits_first_cluster;`: this are the lower 16 bits.
+- `        uint32_t filesize;`: and this is the filesize.
+- `} __attribute__((packed));`: we pack it up!
+### 12.1.6. `struct fat_directory`
+```
+struct fat_directory
+{
+        struct fat_directory_item* item;
+        int total;
+        int sector_pos;
+        int ending_sector_pos;
+};
+```
+- `struct fat_directory`: this is a directory entry.
+- `        struct fat_directory_item* item;`: here we'll point to the items in the directory. they might be a file or directories.
+- `        int total;`: this is the total number of items in the directory.
+- `        int sector_pos;`: this is the sector position, or where in the disk the directory is at.
+- `        int ending_sector_pos;`: and the last sector (if more than one).
+### 12.1.7. `struct fat_item`
+```
+struct fat_item
+{
+        union
+        {
+                struct fat_directory_item* item;
+                struct fat_directory* directory;
+        };
+        FAT_ITEM_TIPE type;
+};
+```
+- `struct fat_item`: this is the file entry.
+- `        union`: we create a union.
+- `                struct fat_directory_item* item;`: here, we might point to a file or...
+- `                struct fat_directory* directory;`: a directory.
+- `        FAT_ITEM_TIPE type;`: and the type, be it file or folder.
+### 12.1.8. `struct fat_item_descriptor`
+```
+struct fat_item_descriptor
+{
+        struct fat_item* item;
+        uint32_t pos;
+};
+```
+- `struct fat_item_descriptor`: this is the file descriptor of the item.
+- `        struct fat_item* item;`: here we point to the item.
+- `        uint32_t pos;`: and here the position in which it exists.
+### 12.1.9. `struct fat_private`
+```
+struct fat_private
+{
+        struct fat_h header;
+        struct fat_directory root_directory;
+        // used to stream data clusters
+        struct disk_stream* cluster_read_stream;
+        // used to stream the FAT table
+        struct disk_stream* fat_read_stream;
+        struct disk_stream* directory_stream;
+};
+```
+- `struct fat_private`: here we define the private data of the FAT filesystem. this data is not supposed to be displayed.
+- `        struct fat_h header;`: here we set the FAT header.
+- `        struct fat_directory root_directory;`: here the root directory.
+- `        struct disk_stream* cluster_read_stream;`: we create a filestream to read clusters.
+- `        struct disk_stream* fat_read_stream;`: we create a filestream to read the FAT table.
+- `        struct disk_stream* directory_stream;`: we create a filestream to read the directory streams.
+For now, it isn't THAT complex. It looks like a lot of code, but it is what is it. FAT16 is one of the simplest filesystems there is, so prepare yourself :)
