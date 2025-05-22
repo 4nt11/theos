@@ -45,3 +45,16 @@ void* memcpy(void* src, void *dst, size_t size)
 	}
 	return dst;
 }
+
+char* strcpy(char* dest, const char* src)
+{
+	char *res = dest;
+	while(*src != 0)
+	{
+		*dest = *src;
+		src += 1;
+		dest += 1;
+	}
+	return res;
+}
+
