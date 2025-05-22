@@ -1299,4 +1299,128 @@ all: ./bin/kernel.bin ./bin/boot.bin
 - `       echo "hello world!" | sudo tee ./bin/mountpoint/helloworld.txt`: here we write something to the disk. it doesn't matter what it is, we just want to have placeholder data for us to read later on.
 - `       sudo umount ./bin/mountpoint`: and here we unmount the disk.
 This is definitely not needed, but it'll help us to later on check if our implementations are working or not.
+# 12. Implementing FAT16 core functions.
+Well... we begin implementing our FAT16 driver. We have a lot of changes to cover. So, let's begin.
+## 12.1. `string.c`
+First we need a `strcpy` function. It's quite easy to make. Let's see it.
+```
+char* strcpy(char* dest, const char* src)
+{
+        char *res = dest;
+        while(*src != 0)
+        {
+                *dest = *src;
+                src += 1;
+                dest += 1;
+        }
+        *dest = 0x00;
+        return res;
+}
+```
+- `char* strcpy(char* dest, const char* src)`: function definition. we'll take a `dest` pointer and some text.
+- `        char *res = dest;`: here we make a pointer to the `dest` pointer.
+- `        while(*src != 0)`: `while` loop until `*src` is 0.
+- `                *dest = *src;`: we point the `dest` value to the `src` value.
+- `                src += 1;`: and we increment the `src` pointer.
+- `                dest += 1;`: same with `dest`.
+- `        *dest = 0x00;`: after finishing the loop, we must add a null byte. we do this because the `while` loop stops right at the NULL byte.
+- `        return res;`: and we return the `res` pointer. we return `res` instead of `dest` because `res` points to `dest`.
+## 12.2. `string.h`
+```
+...
+char* strcpy(char* dest, const char* src);
+...
+```
+- `char* strcpy(char* dest, const char* src);`: this is just a prototype of the function we saw before.
+## 12.3. `file.c`
+```
+...
+static void fs_static_load()
+{
+        fs_insert_filesystem(fat16_init());
+}
+...
+```
+- `        fs_insert_filesystem(fat16_init());`: here we just uncomment this line.
+## 12.4. `fat16.h`
+We begin!
+```
+#ifndef FAT16_H
+#define FAT16_H
+#include "fs/file.h"
 
+struct filesystem* fat16_init();
+
+#endif
+```
+- `struct filesystem* fat16_init();`: function prototype for the `fat16_init` function.
+## 12.5. `fat16.c`
+This is the meat. Here's where, in the future, things might get tricky. For now, we can breath with ease. 
+```
+#include "fat16.h"
+#include "status.h"
+#include "fs/file.h"
+#include "disk/disk.h"
+#include "string/string.h"
+
+void* fat16_fopen(struct disk* disk, struct path_part* path, FILE_MODE mode);
+int fat16_resolve(struct disk* disk);
+
+struct filesystem fat16_fs =
+{
+        .resolve = fat16_resolve,
+        .open = fat16_fopen
+};
+
+struct filesystem* fat16_init()
+{
+        strcpy(fat16_fs.name, "FAT16");
+        return &fat16_fs;
+}
+
+int fat16_resolve(struct disk* disk)
+{
+        return 0;
+}
+
+void* fat16_fopen(struct disk* disk, struct path_part* path, FILE_MODE mode)
+{
+        return 0;
+}
+```
+- `void* fat16_fopen(struct disk* disk, struct path_part* path, FILE_MODE mode);`: we make a prototype of `fat16_fopen` here because if we didnt, the next lines won't compile
+- `int fat16_resolve(struct disk* disk);`: same here.
+- `struct filesystem fat16_fs =`: and this is the line that _would_ cause the issue. nevertheless, it doesn't. we start to create our `fat16_fs` structure.
+- `        .resolve = fat16_resolve,`: here we pointer the `resolve` function pointer to `fat16_resolve`.
+- `        .open = fat16_fopen`: and here we point `open` to the `fat16_open` functino.
+- `struct filesystem* fat16_init()`: function definition.
+- `        strcpy(fat16_fs.name, "FAT16");`: here we `strcpy` "FAT16" to the `name` in the struct.
+- `        return &fat16_fs;`: and here we return our filesystem to the caller.
+- `int fat16_resolve(struct disk* disk)`: function definition. we'll take a `disk` struct.
+- `        return 0;`: we return zero for now. this will make the `file.c` `fs_resolve` function assign our FAT16 filesystem to the disk `0`. in the future, we would add a way to check if the disk is, indeed, fat16. baby steps!
+- `void* fat16_fopen(struct disk* disk, struct path_part* path, FILE_MODE mode)`: function definition. we'd take a `disk`, a `path` and a file mode.
+- `        return 0;`: we return zero for now. we'll implement this later.
+## 12.6. `kernel.c`
+```
+void kernel_main()
+{
+	....
+        // fs init
+        fs_init();
+        // disk init
+        disk_search_and_init();
+        ...
+}
+```
+- `        fs_init();`: here we just call the `fs_init` function.
+- `        disk_search_and_init();`: this function MUST come after!! if we run this before initializing the filesystem structures, the disk won't have an assigned filesystem and the system will not work properly.
+## 12.7. `Makefile`
+```
+FILES = ... ./build/fs/fat/fat16.o
+
+./build/fs/fat/fat16.o: ./src/fs/fat/fat16.c
+        i686-elf-gcc $(INCLUDES) -I./src/fs/ -I./src/fs/fat/ $(FLAGS) -std=gnu99 -c ./src/fs/fat/fat16.c -o ./build/fs/fat/fat16.o
+```
+Although we have done this before, here we add a new include. Well, not new, but we include the `src/fs` folder instead of just `src/fs/fat`.
+
+And that's it for now!
