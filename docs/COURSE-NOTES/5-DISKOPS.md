@@ -865,7 +865,7 @@ SystemIDString          db 'FAT16   '
 - `SystemIDString          db 'FAT16   '`:  this is the file system type. this is an 8 byte value and it must be padded with spaces.
 
 And that's that! 
-## 9.2. `Makefile`
+# 8.2. `Makefile`
 We also modified the `Makefile` a little bit.
 ```
 all: ./bin/kernel.bin ./bin/boot.bin
@@ -873,25 +873,25 @@ all: ./bin/kernel.bin ./bin/boot.bin
         dd if=/dev/zero bs=1048576 count=16 >> ./bin/os.bin
 ```
 - `dd if=/dev/zero bs=1048576 count=16 >> ./bin/os.bin`: we changed the block size to 1048576 (1 megabyte) and the count to 16.
-# 10. Understanding VFS or Virtual File System.
+# 9. Understanding VFS or Virtual File System.
 - The VFS layer allows a kernel to support an infinite amount of filesystems.
 - It allows us to abstract complicated low level functions with higher, simpler interfaces.
 - It also allows the kernel to load and unload filesystem functionality at will.
 - The VFS layer is supposed to be used by all other filesystems.
-## 10.1. What happens when we insert a disk?
+## 9.1. What happens when we insert a disk?
 - The kernel checks for its filesystems and then asks the drive if it has a filesystem it can handle. This process is called resolving the filesystem.
 - If the kernel has functionality for that filesystem, it will then load that functionality and binds it to itself.
 - Userspace programs use syscalls to the kernel to interact with the drives. There is no direct interaction between the user and the hardware.
 Take the following example:
 ```
--> Userspace executes fopen("0:/test.txt", "r") 
--> The kernel then parses the call 
+-> Userspace executes fopen("0:/test.txt", "r")
+-> The kernel then parses the call
 -> Path parser returns path root.
--> disk_read then talks to the drive 
+-> disk_read then talks to the drive
 -> the drive calls the `fopen` FAT32 function and returns a file descriptor.
 ```
-# 11. Implementing the VFS Core Functionality.
-## 11.1. `config.h`
+# 10. Implementing the VFS Core Functionality.
+## 10.1. `config.h`
 We defined some magic numbers for convenience an readability.
 ```
 // max fs
@@ -902,7 +902,7 @@ We defined some magic numbers for convenience an readability.
 ```
 - `#define PEACHOS_MAX_FILESYSTEMS         12`: we've added a max filesystem number. it's completely arbitrary and can be anything we want.
 - `#define PEACHOS_MAX_FILEDESCRIPTORS     51`: and a maximum amount of open files in our system. as before, this is arbitrary and can be whatever we want.
-## 11.2. `file.h`
+## 10.2. `file.h`
 sometext
 ```
 #ifndef FILE_H
@@ -985,7 +985,7 @@ struct filesystem* fs_resolve(struct disk* disk);
 - `void fs_insert_filesystem(struct filesystem* filesystem);`: function prototype. we'll see this later.
 - `struct filesystem* fs_resolve(struct disk* disk);`: function prototype. we'll see this later.
 This is the basis of our VFS layer. As mentioned before, it'll we used by all other filesystems to interface with the OS.
-## 11.3. `file.c`
+## 10.3. `file.c`
 Here's the base implementation. There's still a lot to be done, but we'll get there when we get there.
 ```
 #include "file.h"
@@ -1088,7 +1088,7 @@ int fopen(const char* filename, const char* mode)
 }
 ```
 We will the read the code as it would execute in memory. It's a bit much, but not complex. First, we'll go over the initialization code. Then, we'll go over the others.
-### 11.3.0. Initial definitions.
+### 10.3.0. Initial definitions.
 Before jumping into each function, we need to see the initial structs that are defined by the file.
 ```
 struct filesystem* filesystems[PEACHOS_MAX_FILESYSTEMS];
@@ -1096,7 +1096,7 @@ struct file_descriptor* file_descriptors[PEACHOS_MAX_FILEDESCRIPTORS];
 ```
 - `struct filesystem* filesystems[PEACHOS_MAX_FILESYSTEMS];`: here we define the general `filesystems` structure. it's configured to be of `PEACHOS_MAX_FILESYSTEMS` or 12.
 - `struct file_descriptor* file_descriptors[PEACHOS_MAX_FILEDESCRIPTORS];`: and the general `file_descriptors` structure, which is `PEACHOS_MAX_FILEDESCRIPTORS` or 512.
-### 11.3.1. void fs_init()
+### 10.3.1. void fs_init()
 ```
 void fs_init()
 {
@@ -1107,7 +1107,7 @@ void fs_init()
 - `void fs_init()`: `fs_init` function. it'll setup the filesystems as it executes; initially, it cleans up `file_descriptors`.
 - `        memset(file_descriptors, 0, sizeof(file_descriptors));`: here we `memset` the initial `file_descriptors` to zero.
 - `        fs_load();`: and we call `fs_load`.
-### 11.3.2. void fs_load()
+### 10.3.2. void fs_load()
 ```
 void fs_load()
 {
@@ -1118,7 +1118,7 @@ void fs_load()
 - `void fs_load()`: `fs_load` function. here we `memset` the `filesystems` structure and continue executing.
 - `        memset(filesystems, 0, sizeof(filesystems));`: `memset` call to setup `filesystems` to 0.
 - `        fs_static_load();`: and we now call `fs_static_load`.
-### 11.3.3. static void fs_static_load()
+### 10.3.3. static void fs_static_load()
 ```
 static void fs_static_load()
 {
@@ -1127,7 +1127,7 @@ static void fs_static_load()
 ```
 - `static void fs_static_load()`: function definition. for now, it doesn't do much.
 - `        //fs_insert_filesystem(fat16_init());`: we call `fs_insert_filesystem` with `fat16_init` function, which would return a `filesystem` structure. the function hasn't been implemented yet, to its commented out for now.
-### 11.3.4. void fs_insert_filesystem(struct filesystem *filesystem)
+### 10.3.4. void fs_insert_filesystem(struct filesystem *filesystem)
 ```
 void fs_insert_filesystem(struct filesystem *filesystem)
 {
@@ -1148,7 +1148,7 @@ void fs_insert_filesystem(struct filesystem *filesystem)
 - `                print("no fs!");`: we panic!
 - `                while(1);`: but we don't have a `panic` function yet. so the system just enters an unescapable `while` loop.
 - `        *fs = filesystem;`: if not panicking, we dereference the `*fs` pointers (which in turn accesses the `filesystems` structure defined at the beginning of the file) and sets its value to `filesystem`.
-### 11.3.5. static struct filesystem** fs_get_free_filesystem()
+### 10.3.5. static struct filesystem** fs_get_free_filesystem()
 ```
 static struct filesystem** fs_get_free_filesystem()
 {
@@ -1170,7 +1170,7 @@ static struct filesystem** fs_get_free_filesystem()
 - `                       return &filesystems[i];`: we access the memory value of the `filesystems[i]` and return it to the caller, which is the function we saw before.
 - `        return 0;`: and if anything fails, we return 0.
 And that's it! Pointers get a little bit tricky, but you'll get the hang of it. Now, we need to read the helper functions.
-### 11.3.6. `static int file_new_descriptor(struct file_descriptor** desc_out)`
+### 10.3.6. `static int file_new_descriptor(struct file_descriptor** desc_out)`
 ```
 static int file_new_descriptor(struct file_descriptor** desc_out)
 {
@@ -1201,7 +1201,7 @@ static int file_new_descriptor(struct file_descriptor** desc_out)
 - `                        res = 0;`: and we set `res` to 0.
 - `                        break;`: and we break the loop.
 - `        return res;`: and return `res`.
-### 11.3.7. `static struct file_descriptor* file_get_descriptor(int fd)`
+### 10.3.7. `static struct file_descriptor* file_get_descriptor(int fd)`
 ```
 static struct file_descriptor* file_get_descriptor(int fd)
 {
@@ -1219,7 +1219,7 @@ static struct file_descriptor* file_get_descriptor(int fd)
 - `                return 0;`: and we return zero if any of the conditions are met.
 - `        int index = fd - 1;`: here we create an index value to access the `fd`. if `fd` is one, then we need to access the previous value (`0`) to access the `fd` 1.
 - `        return file_descriptors[index];`: and we return the file descriptor.
-### 11.3.8. `struct filesystem* fs_resolve(struct disk* disk)`
+### 10.3.8. `struct filesystem* fs_resolve(struct disk* disk)`
 ```
 struct filesystem* fs_resolve(struct disk* disk)
 {
@@ -1243,7 +1243,7 @@ struct filesystem* fs_resolve(struct disk* disk)
 - `                        fs = filesystems[i];`: we set `fs` to `filesystems[i]`.
 - `                        break;`: and break.
 - `        return fs;`: and we return the `fs` to the caller.
-### 11.3.9. `int fopen(const char* filename, const char* mode)`
+### 10.3.9. `int fopen(const char* filename, const char* mode)`
 ```
 int fopen(const char* filename, const char* mode)
 {
@@ -1252,7 +1252,7 @@ int fopen(const char* filename, const char* mode)
 ```
 - `int fopen(const char* filename, const char* mode)`: we create the skeleton for our `fopen` function.
 - `        return -EIO;`: we haven't implemented it yet, so we return `-EIO`.
-## 11.4. `disk.h`
+## 10.4. `disk.h`
 sometext
 ```
 ...
@@ -1264,10 +1264,10 @@ struct disk
 };
 ...
 ```
-- `struct disk`: 
+- `struct disk`:
 - ...
 - `        struct filesystem* filesystem;`: we added the `filessytem` structure to our `disk` structure, as a way to identify the disk.
-## 11.5. `disk.c`
+## 10.5. `disk.c`
 sometext
 ```
 void disk_search_and_init()
@@ -1278,9 +1278,9 @@ void disk_search_and_init()
         disk.filesystem = fs_resolve(&disk);
 }
 ```
-- `void disk_search_and_init()`: 
+- `void disk_search_and_init()`:
 - `        disk.filesystem = fs_resolve(&disk);`: here we make a call to the function `fs_resolve`, which in turn will call the `filesystem->FS_RESOLVE_FUNCTION` function pointer defined in the `file.h` header file
-## 11.6. `Makefile`
+## 10.6. `Makefile`
 sometext
 ```
 FILES = ... ./build/fs/file.o
@@ -1299,9 +1299,9 @@ all: ./bin/kernel.bin ./bin/boot.bin
 - `       echo "hello world!" | sudo tee ./bin/mountpoint/helloworld.txt`: here we write something to the disk. it doesn't matter what it is, we just want to have placeholder data for us to read later on.
 - `       sudo umount ./bin/mountpoint`: and here we unmount the disk.
 This is definitely not needed, but it'll help us to later on check if our implementations are working or not.
-# 12. Implementing FAT16 core functions.
+# 11. Implementing FAT16 core functions.
 Well... we begin implementing our FAT16 driver. We have a lot of changes to cover. So, let's begin.
-## 12.1. `string.c`
+## 11.1. `string.c`
 First we need a `strcpy` function. It's quite easy to make. Let's see it.
 ```
 char* strcpy(char* dest, const char* src)
@@ -1325,14 +1325,14 @@ char* strcpy(char* dest, const char* src)
 - `                dest += 1;`: same with `dest`.
 - `        *dest = 0x00;`: after finishing the loop, we must add a null byte. we do this because the `while` loop stops right at the NULL byte.
 - `        return res;`: and we return the `res` pointer. we return `res` instead of `dest` because `res` points to `dest`.
-## 12.2. `string.h`
+## 11.2. `string.h`
 ```
 ...
 char* strcpy(char* dest, const char* src);
 ...
 ```
 - `char* strcpy(char* dest, const char* src);`: this is just a prototype of the function we saw before.
-## 12.3. `file.c`
+## 11.3. `file.c`
 ```
 ...
 static void fs_static_load()
@@ -1342,7 +1342,7 @@ static void fs_static_load()
 ...
 ```
 - `        fs_insert_filesystem(fat16_init());`: here we just uncomment this line.
-## 12.4. `fat16.h`
+## 11.4. `fat16.h`
 We begin!
 ```
 #ifndef FAT16_H
@@ -1354,8 +1354,8 @@ struct filesystem* fat16_init();
 #endif
 ```
 - `struct filesystem* fat16_init();`: function prototype for the `fat16_init` function.
-## 12.5. `fat16.c`
-This is the meat. Here's where, in the future, things might get tricky. For now, we can breath with ease. 
+## 11.5. `fat16.c`
+This is the meat. Here's where, in the future, things might get tricky. For now, we can breath with ease.
 ```
 #include "fat16.h"
 #include "status.h"
@@ -1400,7 +1400,7 @@ void* fat16_fopen(struct disk* disk, struct path_part* path, FILE_MODE mode)
 - `        return 0;`: we return zero for now. this will make the `file.c` `fs_resolve` function assign our FAT16 filesystem to the disk `0`. in the future, we would add a way to check if the disk is, indeed, fat16. baby steps!
 - `void* fat16_fopen(struct disk* disk, struct path_part* path, FILE_MODE mode)`: function definition. we'd take a `disk`, a `path` and a file mode.
 - `        return 0;`: we return zero for now. we'll implement this later.
-## 12.6. `kernel.c`
+## 11.6. `kernel.c`
 ```
 void kernel_main()
 {
@@ -1414,7 +1414,7 @@ void kernel_main()
 ```
 - `        fs_init();`: here we just call the `fs_init` function.
 - `        disk_search_and_init();`: this function MUST come after!! if we run this before initializing the filesystem structures, the disk won't have an assigned filesystem and the system will not work properly.
-## 12.7. `Makefile`
+## 11.7. `Makefile`
 ```
 FILES = ... ./build/fs/fat/fat16.o
 
@@ -1424,3 +1424,21 @@ FILES = ... ./build/fs/fat/fat16.o
 Although we have done this before, here we add a new include. Well, not new, but we include the `src/fs` folder instead of just `src/fs/fat`.
 
 And that's it for now!
+
+# 12. Implementing FAT16 Structures
+### 12.1.1. Constants
+### 12.1.1. `struct fat_header_extended`
+### 12.1.1. `struct fat_header`
+### 12.1.1. `struct fat_h`
+### 12.1.1. `struct fat_directory_item`
+### 12.1.1. `struct fat_directory`
+### 12.1.1. `struct fat_item`
+### 12.1.1. `struct fat_item_descriptor`
+### 12.1.1. `struct fat_private`
+
+# 13. Implementing the FAT16 resolver function
+# 13.1.1. `static void fat16_init_private(struct disk* disk, struct fat_private* private)`
+### 13.1.2. `int fat16_sector_to_absolute(struct disk* disk, int sector)`
+### 13.1.3. `int fat16_get_total_items_for_directory(struct disk* disk, uint32_t directory_start_sector)`
+### 13.1.4. `int fat16_get_root_directory(struct disk* disk, struct fat_private* fat_private, struct fat_directory* directory)`
+
