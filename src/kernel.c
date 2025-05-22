@@ -1,4 +1,6 @@
 #include "kernel.h"
+#include "fs/fat/fat16.h"
+#include "fs/file.h"
 #include "disk/disk.h"
 #include <stdint.h>
 #include <stddef.h>
@@ -72,21 +74,25 @@ void kernel_main()
 {
 	// screen init stuff
 	terminal_initialize();
-	disk_search_and_init();
+	// idt init
 	idt_init();
 	print("[*] hello!\n");
 	print("[*] booting up...\n");
-
 	// memory related init
 	kheap_init();
+	// fs init
+	fs_init();
+	// disk init
+	disk_search_and_init();
+	// creating pagechunk for paging
 	kernel_chunk = paging_new_4gb(PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
+	// switching the tables
 	paging_switch(paging_4gb_chunk_get_directory(kernel_chunk));
+	// enabling paging
 	enable_paging();
+	// enabling interrupts
 	enable_interrupts();
 
-	struct disk_stream* streamer = diskstreamer_new(0);
-	diskstreamer_seek(streamer, 0x201);
-	unsigned char c = 0;
-	diskstreamer_read(streamer, &c, 1);
+
 	while(1) {}
 }
