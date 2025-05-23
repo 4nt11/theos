@@ -20,7 +20,7 @@ SectorsPerFAT 		dw 0x100
 SectorsPerTrack 	dw 0x20
 NumberOfHeads 		dw 0x40
 HiddenSectors 		dd 0x00
-SectorsBig 		dd 0x773544
+SectorsBig 		dd 0x773594
 
 ; Entended BPB
 DriveNumber 		db 0x80
