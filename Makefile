@@ -13,7 +13,7 @@ all: ./bin/kernel.bin ./bin/boot.bin
 	dd if=./bin/kernel.bin >> ./bin/os.bin
 	dd if=/dev/zero bs=1048576 count=16 >> ./bin/os.bin 
 	sudo mount -t vfat ./bin/os.bin ./bin/mountpoint
-	echo "hello world!" | sudo tee ./bin/mountpoint/helloworld.txt
+	echo "hello world!" | sudo tee ./bin/mountpoint/hello.txt
 	sudo umount ./bin/mountpoint
 
 ./bin/kernel.bin: $(FILES)
