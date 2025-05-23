@@ -1,5 +1,5 @@
 set disassembly-flavor intel
-!./build.sh
+#!./build.sh
 layout split
 set confirm off
 add-symbol-file ./build/kernelfull.o 0x100000
