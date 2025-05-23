@@ -19,7 +19,7 @@ insw:
 	mov ebp, esp
 	xor eax, eax
 	mov edx, [ebp+8]
-	in al, dx
+	in ax, dx
 	pop ebp
 	ret
 
@@ -37,6 +37,6 @@ outw:
 	mov ebp, esp
 	mov eax, [ebp+12]
 	mov edx, [ebp+8]
-	out dx, al
+	out dx, ax
 	pop ebp
 	ret
