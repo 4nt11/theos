@@ -117,7 +117,7 @@ FILE_MODE file_get_mode_by_string(const char* str)
 
 }
 
-int fopen(const char* filename, const char* mode)
+int fopen(const char* filename, const char* mode_string)
 {
 	int res = 0;
 	struct path_root* root_path = pathparser_parse(filename, NULL);
@@ -143,6 +143,19 @@ int fopen(const char* filename, const char* mode)
 	if(!disk->filesystem)
 	{
 		res = -EIO;
+		goto out;
+	}
+
+	FILE_MODE mode = file_get_mode_by_string(mode_string);
+	if(mode == FILE_MODE_INVALID)
+	{
+		res = -EINVARG;
+		goto out;
+	}
+	void* descriptor_private_data = disk->filesystem->open(disk, root_path->first, mode);
+	if(ISERR(descriptor_private_data))
+	{
+		res = ERROR_I(descriptor_private_data);
 		goto out;
 	}
 
