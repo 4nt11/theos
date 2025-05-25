@@ -1,6 +1,5 @@
 #ifndef KERNEL_H
 #define KERNEL_H
-#endif
 
 #include <stdint.h>
 
@@ -9,5 +8,10 @@
 #define PEACHOS_MAX_PATH 108
 
 void kernel_main();
-
 void print(const char* str);
+
+#define ERROR(valud) (void*)(value)
+#define ERROR_I(value) (int)(value)
+#define ISERR(value) ((int)value < 0)
+
+#endif
