@@ -91,6 +91,15 @@ int strnlen_terminator(const char* str, int max, char terminator)
 	return i;
 }
 
+char tolower(char s1)
+{
+	if(s1 >= 65 && s1 <= 90)
+	{
+		s1 += 32;
+	}
+	return s1;
+}
+
 int istrncmp(const char* s1, const char* s2, int n)
 {
 	unsigned char u1, u2;
