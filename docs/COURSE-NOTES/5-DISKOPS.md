@@ -1931,3 +1931,266 @@ And finally...
 +       outb(0x1F5, (unsigned char)(lba >> 16));
 ```
 The major bug was only using the `0x1F4` interface to send the LBA values. I NEEDED to use the `0x1F5` too, alongside `0x1F3`. Nevertheless, it's working now.
+
+# 14. Implementing the VFS `fopen`.
+Now, we need to implement the basis of our `fopen` function at the VFS layer. This doesn't mean that we have a working FAT read function, no. We're making the structure for our virtual filesystem layer to be able to handle the calls to FAT16 and any other filesystem that might use it.
+## 14.1. `string.c`
+Before doing the `fopen` basic structure, we need a couple tools for that.
+### 14.1.1. `int strncmp(const char* str1, const char* str2, int n)`
+We'll implement a simple `string compare` function.
+```
+int strncmp(const char* str1, const char* str2, int n)
+{
+        unsigned char u1, u2;
+        while(n-- > 0)
+        {
+                u1 = (unsigned char)*str1++;
+                u2 = (unsigned char)*str2++;
+                if (u1 != u2)
+                {
+                        return u1 - u2;
+                }
+                if (u1 == '\0')
+                {
+                        return 0;
+                }
+        }
+        return 0;
+}
+```
+- `int strncmp(const char* str1, const char* str2, int n)`: here we'll get two strings to compare and an `n` number of bytes to compare.
+- `        unsigned char u1, u2;`: here we'll use two unsigned chars to work with the `str{1,2}` as pointers.
+- `        while(n-- > 0)`: here `while` loop until `n--` (reading all but one) value isn't zero.
+- `                u1 = (unsigned char)*str1++;`: we set `u1` to the first character of `*str1` to it and we increment `str1`.
+- `                u2 = (unsigned char)*str2++;`: we set `u2` to the first character of `*str2` to it and we increment `str2`.
+- `                if (u1 != u2)`: if `u1` and `u2` aren't equal...
+- `                        return u1 - u2;`: we return `u1 - u2`, which isn't zero.
+- `                if (u1 == '\0')`: we check if we arrived at a NULL terminator. if so...
+- `                        return 0;`: we return zero.
+- `        return 0;`: and we return zero here in case the `while` loop finishes before the NULL terminator.
+### 14.1.2. `int strnlen_terminator(const char* str, int max, char terminator)`
+This function will be used to check the lenght of strings with a `max` amount of characters to read and checking for a `terminator` and breaking at it.
+```
+int strnlen_terminator(const char* str, int max, char terminator)
+{
+        int i = 0;
+        for(i = 0; i < max++; i++)
+        {
+                if (str[i] == '\0' || str[i] == terminator)
+                {
+                        break;
+                }
+        }
+        return i;
+}
+```
+- `int strnlen_terminator(const char* str, int max, char terminator)`: function definition. we'll get a string, a `max` bytes to read and a `terminator` value.
+- `        int i = 0;`: here we set the initial counter to zero.
+- `        for(i = 0; i < max; i++)`: here we'll run a `for` loop until `max`.
+- `                if (str[i] == '\0' || str[i] == terminator)`: we check if if value at `str[i]` is a NULL terminator or the `terminator` value. if so...
+- `                        break;`: we break.
+- `        return i;`: and here we return the number of characters read until the `terminator` or the NULL byte.
+### 14.1.3. `char tolower(char s1)`
+Since the cringe FAT filesystem does not distinguish between upper and lower case, we need a way to make everything lowercase.
+```
+char tolower(char s1)
+{
+        if(s1 >= 65 && s1 <= 90)
+        {
+                s1 += 32;
+        }
+        return s1;
+}
+```
+- `char tolower(char s1)`: function definition. we'll take a single char.
+- `        if(s1 >= 65 && s1 <= 90)`: here we check if the `char` is between `65` and `90`. check the ASCII table to see why :) if the char is between these values...
+- `                s1 += 32;`: we increment it by 32, effectively making it lowercase.
+- `        return s1;`: and we return `s1`.
+### 14.1.4. `int istrncmp(const char* s1, const char* s2, int n)`
+We'll also need an case insensitive `strncmp`.
+```
+int istrncmp(const char* s1, const char* s2, int n)
+{
+        unsigned char u1, u2;
+        while(n-- > 0)
+        {
+                u1 = (unsigned char)*s1++;
+                u2 = (unsigned char)*s2++;
+                if(u1 != u2 && tolower(u1) != tolower(u2))
+                {
+                        return u1 - u2;
+                }
+                if (u1 == '\0')
+                {
+                        return 0;
+                }
+        }
+        return 0;
+}
+```
+- `int istrncmp(const char* s1, const char* s2, int n)`: as before, we'll take two strings and an `n` amount of bytes to compare.
+- `        unsigned char u1, u2;`: we make two unsigned chars to use `s1` and `s2` as pointers.
+- `        while(n-- > 0)`: `while` loop that continually decrements `n` as it goes until it's lower than zero.
+- `                u1 = (unsigned char)*s1++;`: here we set `u1` to the first character of the `s1` casted pointer and we increment it.
+- `                u2 = (unsigned char)*s2++;`: here we set `u2` to the first character of the `s2` casted pointer and we increment it.
+- `                if(u1 != u2 && tolower(u1) != tolower(u2))`: we check if `u1` and `u2` are not the same and if converting them to lowercase is also not the same. fi so...
+- `                        return u1 - u2;`: we return `u1` minus `u2`.
+- `                if (u1 == '\0')`: and if we hit a null terminator...
+- `                        return 0;`: we return zero.
+- `        return 0;`: and we also return zero outside, in case we don't hit a null terminator.
+## 14.2. `string.h`
+Here we'll just put our prototypes.
+```
+int strncmp(const char* str1, const char* str2, int n);
+int strnlen_terminator(const char* str, int max, char terminator);
+int istrncmp(const char* s1, const char* s2, int n);
+char tolower(char s1);
+```
+## 14.3. `file.c`
+Before actually getting into the `fopen` function, we need to check something else hehe.
+### 14.3.1. `FILE_MODE file_get_mode_by_string(const char* str)`
+We'll make a function that converts our `mode_string` (more on that later) into an anctual `FILE_MODE` type.
+```
+FILE_MODE file_get_mode_by_string(const char* str)
+{
+        FILE_MODE mode = FILE_MODE_INVALID;
+        if(strncmp(str, "r", 1) == 0)
+        {
+                mode = FILE_MODE_READ;
+        }
+        if(strncmp(str, "w", 1) == 0)
+        {
+                mode = FILE_MODE_WRITE;
+        }
+        if(strncmp(str, "a", 1) == 0)
+        {
+                mode = FILE_MODE_APPEND;
+        }
+
+        return mode;
+
+}
+```
+- `FILE_MODE file_get_mode_by_string(const char* str)`: here we'll receive the `mode_string`.
+- `        FILE_MODE mode = FILE_MODE_INVALID;`: we'll set the initial return value to `FILE_MODE_INVALID`.
+- `        if(strncmp(str, "r", 1) == 0)`: here we check if the initial byte of the `mode_string` is `r`. if so...
+- `                mode = FILE_MODE_READ;`: we set `FILE_MODE_READ.`
+- `        if(strncmp(str, "w", 1) == 0)`: here we check if the initial byte of the `mode_string` is `w`. if so...
+- `                mode = FILE_MODE_WRITE;`: we set `FILE_MODE_WRITE.`
+- `        if(strncmp(str, "a", 1) == 0)`: here we check if the initial byte of the `mode_string` is `a`. if so...
+- `                mode = FILE_MODE_APPEND;`: we set `FILE_MODE_APPEND.`
+- `        return mode;`: and we return the mode.
+### 14.3.2. `int fopen(const char* filename, const char* mode_string)`
+And finally! The `fopen` basis! Let's see it!
+```
+int fopen(const char* filename, const char* mode_string)
+{
+        int res = 0;
+        struct path_root* root_path = pathparser_parse(filename, NULL);
+        if(!root_path)
+        {
+                res = -EINVARG;
+                goto out;
+        }
+        if(!root_path->first)
+        // if 0:/ and not 0:/file.txt...
+        {
+                res = -EINVARG;
+                goto out;
+        }
+
+        struct disk* disk = disk_get(root_path->drive_no);
+        // if 1:/...
+        if(!disk)
+        {
+                res = -EIO;
+                goto out;
+        }
+        if(!disk->filesystem)
+        {
+                res = -EIO;
+                goto out;
+        }
+
+        FILE_MODE mode = file_get_mode_by_string(mode_string);
+        if(mode == FILE_MODE_INVALID)
+        {
+                res = -EINVARG;
+                goto out;
+        }
+        void* descriptor_private_data = disk->filesystem->open(disk, root_path->first, mode);
+        if(ISERR(descriptor_private_data))
+        {
+                res = ERROR_I(descriptor_private_data);
+                goto out;
+        }
+
+        struct file_descriptor* desc = 0;
+        res = file_new_descriptor(&desc);
+        if(res < 0)
+        {
+                goto out;
+        }
+        desc->filesystem = disk->filesystem;
+        desc->private = disk->fs_private;
+        desc->disk = disk;
+        res = desc->index;
+
+out:
+        // fopen shouldnt return negative values.
+        if(res < 0)
+        {
+                res = 0;
+        }
+        return res;
+}
+```
+- `int fopen(const char* filename, const char* mode_string)`: we'll take a filename (path) and a mode.
+- `        int res = 0;`: here we set the initial return value.
+- `        struct path_root* root_path = pathparser_parse(filename, NULL);`: here we'll make a `path_root` using the `pathparser_parse` using the provided `filename` and without a current working directory (NULL).
+- `        if(!root_path)`: if something went wrong with the parsing...
+	- something that could've went wrong is that the user passed "0:/" and no file.
+- `                res = -EINVARG;`: we return `-EINVARG`.
+- `                goto out;`: and we go to `out`.
+- `        if(!root_path->first)`: here we check if the `root_path` has a next element, that is, that we're not pointing at the root directory itself. if so...
+- `                res = -EINVARG;`: we return `-EINVARG`.
+- `                goto out;`: and we go to `out`.
+- `        struct disk* disk = disk_get(root_path->drive_no);`: here we get the disk structure found in the `root_path`.
+- `        if(!disk)`: we check if the disk not zero. if so...
+- `                res = -EIO;`: we return `-EIO`.
+- `                goto out;`: and we go to `out`.
+- `        if(!disk->filesystem)`: here we check if the `disk` structure has a `filesystem` associated with it. if it doesn't...
+- `                res = -EIO;`: we return `-EIO`.
+- `                goto out;`: and we go to `out`.
+- `        FILE_MODE mode = file_get_mode_by_string(mode_string);`: here we get the file open mode with the previously described function.
+- `        if(mode == FILE_MODE_INVALID)`: here we check if the `mode` is invalid. if so...
+- `                res = -EINVARG;`: we return `-EINVARG`.
+- `                goto out;`: and we go to `out`.
+- `        void* descriptor_private_data = disk->filesystem->open(disk, root_path->first, mode);`: here we initialize a void pointer that will hold the value of the `open` function pointer.
+- `        if(ISERR(descriptor_private_data))`: here we check `ISERR`. we'll see what this is later on. know for now that it's a macro that checks if the value is less than zero. if it is...
+- `                res = ERROR_I(descriptor_private_data);`: we res `res` to `ERROR_I`, which is just a macro that casts the error value to an integer.
+- `                goto out;`: and we go to `out`.
+- `        struct file_descriptor* desc = 0;`: here we create a new file descriptor.
+- `        res = file_new_descriptor(&desc);`: here we initialize the file descriptor structures.
+- `        if(res < 0)`: here we check if the `res` value is less than zero. if so...
+- `                goto out;`: we go to `out`.
+- `        desc->filesystem = disk->filesystem;`: here we set the new file descriptor's filesystem to the one we have in the `disk` structure.
+- `        desc->private = disk->fs_private;`: here we set the new file descriptor's private data to the one we have in the `disk` structure.
+- `        desc->disk = disk;`: and we set the file descriptor's `disk` to the `disk` strucutre.
+- `        res = desc->index;`: and we set `res` to the newly created file descriptor index.
+- `out:`: `out` label.
+- `        if(res < 0)`: we check if `res` is lower than zero. if so, no file descriptor was created and...
+- `                res = 0;`: we set it to zero.
+- `        return res;`: and we return.
+In this last two chapters, we've really made use of everything we've made thus far. Path parsers, disk streamers, disk initailizations, heap implementation, and more. Awesome, right?
+## 14.4.1. `kernel.h`
+We've defined some new macros in the `kernel.h` header.
+```
+#define ERROR(valud) (void*)(value)
+#define ERROR_I(value) (int)(value)
+#define ISERR(value) ((int)value < 0)
+```
+- `#define ERROR(valud) (void*)(value)`: here we take a value and we cast it to a void pointer.
+- `#define ERROR_I(value) (int)(value)`: here we take a value and we cast it to an integer.
+- `#define ISERR(value) ((int)value < 0)`: and here we take a value and return true or false depending on if `value` is less than zero or not.
+
