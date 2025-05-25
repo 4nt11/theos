@@ -77,3 +77,16 @@ int strncmp(const char* str1, const char* str2, int n)
 	}
 	return 0;
 }
+
+int strnlen_terminator(const char* str, int max, char terminator)
+{
+	int i = 0;
+	for(i = 0; i < max++; i++)
+	{
+		if (str[i] == '\0' || str[i] == terminator)
+		{
+			break;
+		}
+	}
+	return i;
+}
