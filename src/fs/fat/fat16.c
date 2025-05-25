@@ -183,7 +183,7 @@ int fat16_get_total_items_per_directory(struct disk* disk, uint32_t directory_st
 
 out:
 	return res;
-	}
+}
 
 int fat16_get_root_directory(struct disk* disk, struct fat_private* private, struct fat_directory* directory)
 {
