@@ -1,6 +1,7 @@
 #include "file.h"
 #include "status.h"
 #include "fat/fat16.h"
+#include "disk/disk.h"
 #include "kernel.h"
 #include "memory/memory.h"
 #include "memory/heap/kheap.h"
@@ -97,6 +98,34 @@ struct filesystem* fs_resolve(struct disk* disk)
 
 int fopen(const char* filename, const char* mode)
 {
-	return -EIO;
+	int res = 0;
+	struct path_root* root_path = pathparser_parse(filename, NULL);
+	if(!root_path)
+	{
+		res = -EINVARG;
+		goto out;
+	}
+	if(!root_path->first)
+	// if 0:/ and not 0:/file.txt...
+	{
+		res = -EINVARG;
+		goto out;
+	}
+
+	struct disk* disk = disk_get(root_path->drive_no);
+	// if 1:/...
+	if(!disk)
+	{
+		res = -EIO;
+		goto out;
+	}
+	if(!disk->filesystem)
+	{
+		res = -EIO;
+		goto out;
+	}
+
+out:
+	return res;
 }
 
