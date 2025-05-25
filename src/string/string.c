@@ -90,3 +90,22 @@ int strnlen_terminator(const char* str, int max, char terminator)
 	}
 	return i;
 }
+
+int istrncmp(const char* s1, const char* s2, int n)
+{
+	unsigned char u1, u2;
+	while(n-- > 0)
+	{
+		u1 = (unsigned char)*s1++;
+		u2 = (unsigned char)*s2++;
+		if(u1 != u2 && tolower(u1) != tolower(u2))
+		{
+			return u1 - u2;
+		}
+		if (u1 == '\0')
+		{
+			return 0;
+		}
+	}
+	return 0;
+}
