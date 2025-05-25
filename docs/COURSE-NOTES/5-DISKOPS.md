@@ -1630,3 +1630,304 @@ struct fat_private
 - `        struct disk_stream* fat_read_stream;`: we create a filestream to read the FAT table.
 - `        struct disk_stream* directory_stream;`: we create a filestream to read the directory streams.
 For now, it isn't THAT complex. It looks like a lot of code, but it is what is it. FAT16 is one of the simplest filesystems there is, so prepare yourself :)
+
+# 13. Implementing the FAT16 resolver function
+This chapter is one of the most complex so far. From here, we'll put to the test everything we've made so far. Our path parser, our I/O functions, our boot FAT sector, our previously made FAT structures, disk streamers and more. As a matter of fact, a couple of thing I made previously were wrong. I mistyped some bytes and did a couple fuck ups. Those we'll fix here, too. But we'll do those at the very end. First, let's go over the FAT resolver implementation.
+### 13.1.1. `disk.h`
+Here we did a minor change to the `disk` structure. We've added a disk `id`.
+```
+struct disk
+{
+        PEACHOS_DISK_TYPE type;
+        int sector_size;
+        struct filesystem* filesystem;
+        int id;
+        void* fs_private;
+};
+```
+- `int id`: this `id` will hold the disk ID associated with the disk.
+### 13.1.2. `disk.c`
+Since we've modified the disk structure, we also need to reflect the changes in the disk initialization routine.
+```
+void disk_search_and_init()
+{
+        memset(&disk, 0, sizeof(disk));
+        disk.type = PEACHOS_DISK_TYPE_REAL;
+        disk.sector_size = PEACHOS_SECTOR_SIZE;
+        disk.filesystem = fs_resolve(&disk);
+        disk.id = 0;
+}
+```
+  - `      disk.id = 0;`: here we'll set 0 for now. Remember that as of right now, we don't have a way to detect disks and other stuff. Just disk 0.
+## fat16.c
+Here's where we get into the resolver function. We'll go over it step by step, from order of execution in the main `fat16_resolve` function.
+### 13.2.1. `static void fat16_init_private(struct disk* disk, struct fat_private* private)`
+Similar to all our other `init` functions, this function will initialize the private structures of our FAT filesystems. This data contains the FAT header, FAT extended header, data streams and other stuff. We initialize the streams, as of right now. We'll get the sector information later on.
+```
+static void fat16_init_private(struct disk* disk, struct fat_private* private)
+{
+        memset(private, 0, sizeof(struct fat_private));
+        private->cluster_read_stream = diskstreamer_new(disk->id);
+        private->fat_read_stream = diskstreamer_new(disk->id);
+        private->directory_stream = diskstreamer_new(disk->id);
+}
+```
+- `static void fat16_init_private(struct disk* disk, struct fat_private* private)`: function definition. we'll take a disk and a previously defined `fat_private` structure.
+- `        memset(private, 0, sizeof(struct fat_private));`: here we memset the entire data region to zero.
+- `        private->cluster_read_stream = diskstreamer_new(disk->id);`: here we initialize the cluster stream.
+- `        private->fat_read_stream = diskstreamer_new(disk->id);`: here we initialize the FAT reading stream.
+- `        private->directory_stream = diskstreamer_new(disk->id);`: here we initialize the directory stream.
+### 13.2.2. `int fat16_get_root_directory(struct disk* disk, struct fat_private* fat_private, struct fat_directory* directory)`
+Now here we're starting to get serious. The `fat16_get_root_directory` function will do several calls to get the root directory and other fun stuff.
+```
+int fat16_get_root_directory(struct disk* disk, struct fat_private* private, struct fat_directory* directory)
+{
+        int res = 0;
+        struct fat_header* primary_header = &private->header.primary_header;
+        int root_dir_sector_pos = (primary_header->fat_copies * primary_header->sectors_per_fat) + primary_header->reserved_sectors;
+        int root_directory_entries = private->header.primary_header.root_dir_entries;
+        int root_directory_size = (root_directory_entries * sizeof(struct fat_directory_item));
+        int total_sectors = root_directory_size / disk->sector_size;
+        if(root_directory_size % disk->sector_size)
+        {
+                total_sectors += 1;
+        }
+        int total_items = fat16_get_total_items_per_directory(disk, root_dir_sector_pos);
+
+        struct fat_directory_item* dir = kzalloc(sizeof(root_directory_size));
+        if(!dir)
+        {
+                res = -ENOMEM;
+                goto out;
+        }
+        struct disk_stream* stream = private->directory_stream;
+        if(diskstreamer_seek(stream, fat16_sector_to_absolute(disk, root_dir_sector_pos)) != PEACHOS_ALLOK)
+        {
+                res = -EIO;
+                goto out;
+        }
+        if(diskstreamer_read(stream, dir, root_directory_size) != PEACHOS_ALLOK)
+        {
+                res = -EIO;
+                goto out;
+        }
+
+        directory->item = dir;
+        directory->total = total_items;
+        directory->sector_pos = root_dir_sector_pos;
+        directory->ending_sector_pos = root_dir_sector_pos + (root_directory_size / disk->sector_size);
+
+out:
+        return res;
+}
+```
+- `int fat16_get_root_directory(struct disk* disk, struct fat_private* private, struct fat_directory* directory)`: function definition. we'll take a disk, a fat_private and a directory structure. the directory structure is inside the `fat_private` struct.
+- `        int res = 0;`: here we set the initial return value.
+- `        struct fat_header* primary_header = &private->header.primary_header;`: here we create a pointer to the `primary_header` (FAT header). it'll be easier to work with it this way.
+- `        int root_dir_sector_pos = (primary_header->fat_copies * primary_header->sectors_per_fat) + primary_header->reserved_sectors;`: here we calculate the root directory by multiplying the amount of FAT table copies with the sectors per FAT value (256 or `0x100`). this is then added to the amount of `reserved_sectors`. this formula will give us the exact place in which the `root_directory` should be positioned.
+- `        int root_directory_entries = private->header.primary_header.root_dir_entries;`: here we get the amount of root directory entries from the primary header.
+- `        int root_directory_size = (root_directory_entries * sizeof(struct fat_directory_item));`: here we get the total directory size by multiplying the `root_directory_entries` with the size of the `fat_directory_item` struct.
+- `        int total_sectors = root_directory_size / disk->sector_size;`: here we get the total amount of sectors used by the `root_directory_size` (bytes value) and dividing it by the logical `sector_size` defined in our `disk`.
+- `        if(root_directory_size % disk->sector_size)`: here we check if the `root_directory_size` needs alignment. if so...
+- `                total_sectors += 1;`: we add `1` to the total sector count.
+- `        int total_items = fat16_get_total_items_per_directory(disk, root_dir_sector_pos);`: here we call the `fat16_get_total_items` function. we'll see that function right after this one. in short: it returns the amount of _stuff_ in the root directory. be it files or directories.
+- `        struct fat_directory_item* dir = kzalloc(sizeof(root_directory_size));`: here we create and allocate zero'd out memory for the `root_directory_size` size.
+- `        if(!dir)`: here we check if the allocation failed. if so...
+- `                res = -ENOMEM;`: return `-ENOMEM`.
+- `                goto out;`: and go to the `out` label.
+- `        struct disk_stream* stream = private->directory_stream;`: here we access the previously initialized `directory_stream`
+- `        if(diskstreamer_seek(stream, fat16_sector_to_absolute(disk, root_dir_sector_pos)) != PEACHOS_ALLOK)`: here we `seek` to the `fat16_sector_to_absolute` byte, which we'll see later on. for now, just keep in mind that we're multiplying the sector value contained in `root_dir_sector_pos` to the byte value usable by the `diskstreamer_read`. if this call fails...
+- `                res = -EIO;`: we return `-EIO`
+- `                goto out;`: and we go to the `out` label.
+- `        if(diskstreamer_read(stream, dir, root_directory_size) != PEACHOS_ALLOK)`: here we read the bytes set in the `diskstreamer_seek` function, which size is `root_directory_size` into the `dir` buffer. if this call fails...
+- `                res = -EIO;`: we return `-EIO`
+- `                goto out;`: and we go to the `out` label.
+- `        directory->item = dir;`: here we set the `directory` item to `dir`.
+- `        directory->total = total_items;`: here we set the `total` to `total_items`.
+- `        directory->sector_pos = root_dir_sector_pos;`: here we set the `sector_pos` to `root_dir_sector_pos`.
+- `        directory->ending_sector_pos = root_dir_sector_pos + (root_directory_size / disk->sector_size);`: and the `ending_sector_pos` is a calculation in which we sum the ending sector position with the `root_directory_size` divided by the sector size in our `disk`.
+- `out:`: `out` label.
+- `        return res;`: and here we return res, which, if everything went well, will be zero.
+### 13.2.3. `int fat16_get_total_items_for_directory(struct disk* disk, uint32_t directory_start_sector)`
+Here we'll see how we can calculate the amount of _stuff_ held in a directory.
+```
+int fat16_get_total_items_per_directory(struct disk* disk, uint32_t directory_start_sector)
+{
+        struct fat_directory_item item;
+        struct fat_directory_item empty_item;
+        memset(&empty_item, 0, sizeof(empty_item));
+
+        struct fat_private* private = disk->fs_private;
+
+        int res = 0;
+        int i = 0;
+        int directory_start_pos = directory_start_sector * disk->sector_size;
+        struct disk_stream* stream = private->directory_stream;
+        if(diskstreamer_seek(stream, directory_start_pos) != PEACHOS_ALLOK)
+        {
+                res = -EIO;
+                goto out;
+        }
+
+        while(1)
+        {
+                if(diskstreamer_read(stream, &item, sizeof(item)) != PEACHOS_ALLOK)
+                {
+                        res = -EIO;
+                        goto out;
+                }
+                if (item.filename[0] == 0x00)
+                {
+                        break;
+                }
+                if (item.filename[0] == 0xE5)
+                {
+                        continue;
+                }
+                i++;
+        }
+        res = i;
+
+out:
+        return res;
+}
+```
+- `int fat16_get_total_items_per_directory(struct disk* disk, uint32_t directory_start_sector)`: here we'll get the `disk` and the starting sector from which we'll get the directory total.
+- `        struct fat_directory_item item;`: here we define a `fat_directory_item`.
+- `        struct fat_directory_item empty_item;`: here we define another one, but it won't be used.
+- `        memset(&empty_item, 0, sizeof(empty_item));`: here we memset the empty directory to zero.
+- `        struct fat_private* private = disk->fs_private;`: here we access the private data contained by our filesystem.
+- `        int res = 0;`: we set the `res` return value.
+- `        int i = 0;`: and a counter, which we'll use to count how many _things_ are in a directory.
+- `        int directory_start_pos = directory_start_sector * disk->sector_size;`: here we get the initial position in bytes by multiplying the `directory_start_sector` with the disk's logical `sector_size`.
+- `        struct disk_stream* stream = private->directory_stream;`: here we access the previously initialized `directory_stream` `stream`.
+- `        if(diskstreamer_seek(stream, directory_start_pos) != PEACHOS_ALLOK)`: here we `seek` to the `directory_start_pos`. if something goes wrong...
+- `                res = -EIO;`: we return `-EIO`.
+- `                goto out;`: and we go to `out`.
+- `        while(1)`: now, we'll need an infinite loop to read over the items we have in the directories. 
+- `                if(diskstreamer_read(stream, &item, sizeof(item)) != PEACHOS_ALLOK)`: here we read from the previous `seek` byte into `&item` with a size of `item`. `&item`, after each iteration, will grow in size. if the read function goes wrong...
+- `                        res = -EIO;`: we return `-EIO`.
+- `                        goto out;`: and we go to `out`.
+- `                if (item.filename[0] == 0x00)`: here we check if the `filename` starts with null bytes. if so, we have read over everything.
+- `                        break;`: and we break the loop.
+- `                if (item.filename[0] == 0xE5)`: if `0xE5`, we've found something. 
+- `                        continue;`: we continue.
+- `                i++;`: and we add an item to the `i` counter.
+- `        res = i;`: here we set `res` to `i`
+- `out:`: `out` label.
+- `        return res;`: and we return `res`.
+### 13.2.4. `int fat16_sector_to_absolute(struct disk* disk, int sector)`
+This function is quite simple, as previously stated.
+```
+int fat16_sector_to_absolute(struct disk* disk, int sector)
+{
+        return sector * disk->sector_size;
+}
+```
+- `int fat16_sector_to_absolute(struct disk* disk, int sector)`: function definition. we'll take a disk and a sector.
+- `        return sector * disk->sector_size;`: we return the sector multiplied by the `sector_size`.
+### 13.2.5. `int fat16_resolve(struct disk* disk)`
+Here's where everything before comes together. Not really. At least not for now.
+```
+int fat16_resolve(struct disk* disk)
+{
+        int res = 0;
+        struct fat_private* fat_private = kzalloc(sizeof(struct fat_private));
+        fat16_init_private(disk, fat_private);
+
+        disk->fs_private = fat_private;
+        disk->filesystem = &fat16_fs;
+
+        struct disk_stream* stream = diskstreamer_new(disk->id);
+        if(!stream)
+        {
+                res = -ENOMEM;
+                goto out;
+        }
+        if(diskstreamer_read(stream, &fat_private->header, sizeof(fat_private->header)) != PEACHOS_ALLOK)
+        {
+                res = -EIO;
+                goto out;
+        }
+
+        if (fat_private->header.shared.extended_header.signature != 0x29)
+        {
+                res = -EFSNOTUS;
+                goto out;
+        }
+
+        if (fat16_get_root_directory(disk, fat_private, &fat_private->root_directory) != PEACHOS_ALLOK)
+        {
+                res = -EIO;
+                goto out;
+        }
+
+out:
+        if(stream)
+        {
+                diskstreamer_close(stream);
+        }
+
+        if(res < 0)
+        {
+                kfree(fat_private);
+                disk->fs_private = 0;
+        }
+
+        return res;
+}
+```
+- `int fat16_resolve(struct disk* disk)`: function definition. we'll just take a disk.
+- `        int res = 0;`: we set the initial return value.
+- `        struct fat_private* fat_private = kzalloc(sizeof(struct fat_private));`: here we allocate some memory on the heap for the `fat_private` data structure.
+- `        fat16_init_private(disk, fat_private);`: here we initialize the `fat_private`, as seen previously.
+- `        disk->fs_private = fat_private;`: here we set the `disk` private data to the `fat_private`.
+- `        disk->filesystem = &fat16_fs;`: and here we assign the filesystem to us, for now.
+- `        struct disk_stream* stream = diskstreamer_new(disk->id);`: here we create a new stream.
+- `        if(!stream)`: if the stream wasn't created successfully...
+- `                res = -ENOMEM;`: we return `-ENOMEM`.
+- `                goto out;`: and go to `out`.
+- `        if(diskstreamer_read(stream, &fat_private->header, sizeof(fat_private->header)) != PEACHOS_ALLOK)`: by not using `seek`, we're reading at byte 0 into the `&fat_private->header` with a size of `fat_private->header`. if something happened...
+- `                res = -EIO;`: we return `-EIO`.
+- `                goto out;`: and we go to `out`.
+- `        if (fat_private->header.shared.extended_header.signature != 0x29)`: to check that the filesystem is indeed us, we'll read the `fat_private->header.shared.extended_header.signature` value, which should be `0x29`. if not...
+- `                res = -EFSNOTUS;`: we return `-EFSNOTUS`.
+- `                goto out;`: and go to `out`.
+- `        if (fat16_get_root_directory(disk, fat_private, &fat_private->root_directory) != PEACHOS_ALLOK)`: and here we get the root directory. and set it to `&fat_private->root_directory`. if something goes wrong...
+- `                res = -EIO;`: we return `-EIO`.
+- `                goto out;`: and we go to `out`.
+- `out:`: `out` label.
+- `        if(stream)`: here we check if `stream` is opened. if so...
+- `                diskstreamer_close(stream);`: we close it.
+- `        if(res < 0)`: and here we check fi `res` is less than zero. if so, something went wrong, and we should...
+- `                kfree(fat_private);`: free the memory used by `fat_private` 
+- `                disk->fs_private = 0;`: and reset the `fs_private` data.
+- `        return res;`: and we return `res`. which, if zero, is OK; if not, NOT OK.
+And that's it! We have working resolver function. Not really. If you were following step by step, you'll have issues. So, let's fix them.
+## 13.3. Fixing the fuckups.
+### 13.3.1. `io.asm`
+So when making the `io.asm` labels, I mistyped some registers.
+```
+insw:
+	...
+-       in al, dx
++       in ax, dx
+	...
+```
+Yes. We were reading byte (singular) instead of bytes (plural) in an `insw`, where we should be reading TWO bytes. I debugged this for like 4 hours.
+### 13.3.1. `boot.asm`
+Here I also mistyped some bytes.
+```
+-SectorsBig             dd 0x773544
++SectorsBig             dd 0x773594
+```
+Yes. Instead of a `9`, I wrote a `4`. As before, it took me HOURS to find this. But hey, you live you learn.
+### 13.3.1. `disk.c`
+And finally...
+```
+-       outb(0x1F4, (unsigned char) lba >> 8);
+-       outb(0x1F4, (unsigned char) lba >> 16);
++       outb(0x1F4, (unsigned char)(lba >> 8));
++       outb(0x1F5, (unsigned char)(lba >> 16));
+```
+The major bug was only using the `0x1F4` interface to send the LBA values. I NEEDED to use the `0x1F5` too, alongside `0x1F3`. Nevertheless, it's working now.
