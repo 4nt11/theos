@@ -159,7 +159,23 @@ int fopen(const char* filename, const char* mode_string)
 		goto out;
 	}
 
+	struct file_descriptor* desc = 0;
+	res = file_new_descriptor(&desc);
+	if(res < 0)
+	{
+		goto out;
+	}
+	desc->filesystem = disk->filesystem;
+	desc->private = disk->fs_private;
+	desc->disk = disk;
+	res = desc->index;
+
 out:
+	// fopen shouldnt return negative values.
+	if(res < 0)
+	{
+		res = 0;
+	}
 	return res;
 }
 
