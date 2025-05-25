@@ -4,6 +4,7 @@
 #include "disk/disk.h"
 #include "kernel.h"
 #include "memory/memory.h"
+#include "string/string.h"
 #include "memory/heap/kheap.h"
 #include "config.h"
 
@@ -94,6 +95,26 @@ struct filesystem* fs_resolve(struct disk* disk)
 	}
 
 	return fs;
+}
+
+FILE_MODE file_get_mode_by_string(const char* str)
+{
+	FILE_MODE mode = FILE_MODE_INVALID;
+	if(strncmp(str, "r", 1) == 0)
+	{
+		mode = FILE_MODE_READ;
+	}
+	if(strncmp(str, "w", 1) == 0)
+	{
+		mode = FILE_MODE_WRITE;
+	}
+	if(strncmp(str, "a", 1) == 0)
+	{
+		mode = FILE_MODE_APPEND;
+	}
+
+	return mode;
+
 }
 
 int fopen(const char* filename, const char* mode)
