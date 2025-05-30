@@ -31,4 +31,7 @@
 // max open files
 #define PEACHOS_MAX_FILEDESCRIPTORS 	512
 
+// max path
+#define PEACHOS_MAX_PATH 108
+
 #endif
