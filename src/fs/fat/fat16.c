@@ -333,6 +333,61 @@ static int fat16_cluster_to_sector(struct fat_private* private, int cluster)
 	return private->root_directory.ending_sector_pos + ((cluster - 2) * private->header.primary_header.sectors_per_cluster);
 }
 
+static uint32_t fat16_get_first_fat_sector(struct fat_private* private)
+{
+	return private->header.primary_header.reserved_sectors;
+}
+
+static int fat16_get_fat_entry(struct disk* disk, int cluster)
+{
+	int res = -1;
+
+	struct fat_private* private = disk->fs_private;
+	struct disk_stream* stream = private->fat_read_stream;
+	if(!stream)
+	{
+		goto out;
+	}
+	uint32_t fat_table_position = fat16_get_first_fat_sector(private) * disk->sector_size;
+
+	res = diskstreamer_seek(stream, fat_table_position * (cluster * PEACHOS_FAT16_FAT_ENTRY_SIZE));
+	if(res < 0)
+	{
+		goto out;
+	}
+	uint16_t result = 0;
+	res = diskstreamer_read(stream, &result, sizeof(result));
+	if (res < 0)
+	{
+		goto out;
+	}
+
+
+out:
+	return res;
+}
+
+static int fat16_get_cluster_for_offset(struct disk* disk, int starting_cluster, int offset)
+{
+	int res = 0;
+	struct fat_private* private = disk->fs_private;
+	int size_of_cluster_bytes = private->header.primary_header.sectors_per_cluster * disk->sector_size;
+	int clusters_ahead = offset / size_of_cluster_bytes;
+	for (int i = 0; i < clusters_ahead; i++)
+	{
+		int entry = fat16_get_fat_entry(disk, cluster_to_use);
+		if (entry == 0xFF8 || entry == 0xFFF)
+		{
+			// last entry in file
+			res = -EIO;
+			goto out;
+		}
+	}
+
+out:
+	return res;
+}
+
 static int fat16_read_internal_from_stream(struct disk* disk, struct disk_stream* stream, int start_cluster, int offset, int total, void* out)
 {
 	int res = 0;
