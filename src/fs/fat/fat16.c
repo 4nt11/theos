@@ -333,9 +333,22 @@ static int fat16_cluster_to_sector(struct fat_private* private, int cluster)
 	return private->root_directory.ending_sector_pos + ((cluster - 2) * private->header.primary_header.sectors_per_cluster);
 }
 
+static int fat16_read_internal_from_stream(struct disk* disk, struct disk_stream* stream, int start_cluster, int offset, int total, void* out)
+{
+	int res = 0;
+	struct fat_private* private = disk->fs_private;
+	int size_of_cluster_bytes = private->header.primary_header.sectors_per_cluster * disk->sector_size;
+	int cluster_to_use = fat16_get_cluster_for_offset(disk, cluster, offset);
+	if (cluster_to_use < 0)
+	{
+		res = cluster_to_use;
+		goto out;
+	}
+out:
+	return res;
+}
 
-
-struct int fat16_read_internal(struct disk* disk, int starting_cluster, int offset, int total, void* out)
+static int fat16_read_internal(struct disk* disk, int starting_cluster, int offset, int total, void* out)
 {
 	struct fat_private* private = disk->fs_private;
 	struct disk_stream* stream = private->cluster_read_stream;
