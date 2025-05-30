@@ -93,6 +93,11 @@ void kernel_main()
 	// enabling interrupts
 	enable_interrupts();
 
+	int fd = fopen("0:/hello.txt", "r");
+	if(fd)
+	{
+		print("hello is opeend!");
+	}
 
 	while(1) {}
 }
