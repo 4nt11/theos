@@ -312,7 +312,7 @@ struct fat_directory_item* fat16_clone_directory_item(struct fat_directory_item*
 	{
 		return 0;
 	}
-	item_copy = kzalloc(sizeof(size));
+	item_copy = kzalloc(size);
 	if (!item_copy)
 	{
 		return 0;
@@ -325,7 +325,7 @@ struct fat_directory_item* fat16_clone_directory_item(struct fat_directory_item*
 
 static uint32_t fat16_get_first_cluster(struct fat_directory_item* item)
 {
-	return (item->high_16_bits_first_cluster | item->low_16_bits_first_cluster);
+	return (item->high_16_bits_first_cluster) | item->low_16_bits_first_cluster;
 }
 
 static int fat16_cluster_to_sector(struct fat_private* private, int cluster)
@@ -362,7 +362,7 @@ static int fat16_get_fat_entry(struct disk* disk, int cluster)
 		goto out;
 	}
 
-
+	res = result;
 out:
 	return res;
 }
@@ -459,6 +459,7 @@ void fat16_free_directory(struct fat_directory* directory)
 	{
 		kfree(directory->item);
 	}
+	kfree(directory);
 }
 
 void fat16_fat_item_free(struct fat_item* item)
@@ -514,7 +515,6 @@ out:
 	if (res != PEACHOS_ALLOK)
 	{
 		fat16_free_directory(directory);
-		goto out;
 	}
 	return directory;
 }
