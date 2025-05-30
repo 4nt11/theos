@@ -310,18 +310,81 @@ struct fat_directory_item* fat16_clone_directory_item(struct fat_directory_item*
 	struct fat_directory_item* item_copy = 0;
 	if (size < sizeof(struct fat_directory_item))
 	{
-		goto out;
+		return 0;
 	}
 	item_copy = kzalloc(sizeof(size));
 	if (!item_copy)
 	{
-		goto out;
+		return 0;
 	}
 	memcpy(item_copy, item, size);
 
-out:
 	return item_copy;
 
+}
+
+static uint32_t fat16_get_first_cluster(struct fat_directory_item* item)
+{
+	return (item->high_16_bits_first_cluster | item->low_16_bits_first_cluster);
+}
+
+static int fat16_cluster_to_sector(struct fat_private* private, int cluster)
+{
+	return private->root_directory.ending_sector_pos + ((cluster - 2) * private->header.primary_header.sectors_per_cluster);
+}
+
+
+
+struct int fat16_read_internal(struct disk* disk, int starting_cluster, int offset, int total, void* out)
+{
+	struct fat_private* private = disk->fs_private;
+	struct disk_stream* stream = private->cluster_read_stream;
+	return fat16_read_internal_from_stream(disk, stream, starting_cluster, offset, total, out);
+}
+
+struct fat_directory* fat16_load_fat_directory(struct disk* disk, struct fat_directory_item* item)
+{
+	int res = 0;
+	struct fat_directory* directory = 0;
+	struct fat_private* private = disk->fs_private;
+	if (!(item->attribute & FAT_FILE_SUBDIRECTORY))
+	{
+		res = -EINVARG;
+		goto out;
+	}
+
+	directory = kzalloc(sizeof(struct fat_directory));
+	if (!directory)
+	{
+		res = -ENOMEM;
+		goto out;
+	}
+
+	int cluster = fat16_get_first_cluster(item);
+	int cluster_sector = fat16_cluster_to_sector(private, cluster);
+	int total_items = fat16_get_total_items_per_directory(disk, cluster_sector);
+	directory->total = total_items;
+	int directory_size = directory->total * sizeof(struct fat_directory_item);
+	directory->item = kzalloc(directory_size);
+	if(!directory->item)
+	{
+		res = -ENOMEM;
+		goto out;
+	}
+	res = fat16_read_internal(disk, cluster, 0x00, directory_size, directory->item);
+	if (res != PEACHOS_ALLOK)
+	{
+		goto out;
+	}
+
+
+out:
+	if (res != PEACHOS_ALLOK)
+	{
+		fat16_free_directory(directory);
+		goto out;
+	}
+	return directory;
 }
 
 struct fat_item* fat16_new_fat_item_for_directory_item(struct disk* disk, struct fat_directory_item* item)
