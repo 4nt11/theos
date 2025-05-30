@@ -372,6 +372,7 @@ static int fat16_get_cluster_for_offset(struct disk* disk, int starting_cluster,
 	int res = 0;
 	struct fat_private* private = disk->fs_private;
 	int size_of_cluster_bytes = private->header.primary_header.sectors_per_cluster * disk->sector_size;
+	int cluster_to_use = starting_cluster;
 	int clusters_ahead = offset / size_of_cluster_bytes;
 	for (int i = 0; i < clusters_ahead; i++)
 	{
@@ -382,13 +383,31 @@ static int fat16_get_cluster_for_offset(struct disk* disk, int starting_cluster,
 			res = -EIO;
 			goto out;
 		}
-	}
+		// is sector bad?
+		if (entry == PEACHOS_FAT16_BAD_SECTOR)
+		{
+			res = -EIO;
+			goto out;
+		}
+		if (entry == 0xFF0 || entry == 0xFF6)
+		{
+			res = -EIO;
+			goto out;
+		}
+		if (entry == 0x00)
+		{
+			res = -EIO;
+			goto out;
+		}
 
+		cluster_to_use = entry;
+	}
+	res = cluster_to_use;
 out:
 	return res;
 }
 
-static int fat16_read_internal_from_stream(struct disk* disk, struct disk_stream* stream, int start_cluster, int offset, int total, void* out)
+static int fat16_read_internal_from_stream(struct disk* disk, struct disk_stream* stream, int cluster, int offset, int total, void* out)
 {
 	int res = 0;
 	struct fat_private* private = disk->fs_private;
@@ -399,6 +418,26 @@ static int fat16_read_internal_from_stream(struct disk* disk, struct disk_stream
 		res = cluster_to_use;
 		goto out;
 	}
+
+	int offset_from_cluster = offset % size_of_cluster_bytes;
+	int starting_sector = fat16_cluster_to_sector(private, cluster_to_use);
+	int starting_pos = (starting_sector * disk->sector_size) * offset_from_cluster;
+	int total_to_read = total > size_of_cluster_bytes ? size_of_cluster_bytes : total;
+
+	res = diskstreamer_seek(stream, starting_pos);
+	if(res != PEACHOS_ALLOK)
+	{
+		goto out;
+	}
+	res = diskstreamer_read(stream, out, total_to_read);
+	if (res != PEACHOS_ALLOK)
+	{
+		goto out;
+	}
+	if (total > 0)
+	{
+		res = fat16_read_internal_from_stream(disk, stream, cluster, offset+total_to_read, total, out + total_to_read);
+	}
 out:
 	return res;
 }
@@ -408,6 +447,18 @@ static int fat16_read_internal(struct disk* disk, int starting_cluster, int offs
 	struct fat_private* private = disk->fs_private;
 	struct disk_stream* stream = private->cluster_read_stream;
 	return fat16_read_internal_from_stream(disk, stream, starting_cluster, offset, total, out);
+}
+
+void fat16_free_directory(struct fat_directory* directory)
+{
+	if(!directory)
+	{
+		return;
+	}
+	if(directory->item)
+	{
+		kfree(directory->item);
+	}
 }
 
 struct fat_directory* fat16_load_fat_directory(struct disk* disk, struct fat_directory_item* item)
