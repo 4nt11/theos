@@ -434,6 +434,7 @@ static int fat16_read_internal_from_stream(struct disk* disk, struct disk_stream
 	{
 		goto out;
 	}
+	total -= total_to_read;
 	if (total > 0)
 	{
 		res = fat16_read_internal_from_stream(disk, stream, cluster, offset+total_to_read, total, out + total_to_read);
