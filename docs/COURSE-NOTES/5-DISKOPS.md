@@ -2193,4 +2193,585 @@ We've defined some new macros in the `kernel.h` header.
 - `#define ERROR(valud) (void*)(value)`: here we take a value and we cast it to a void pointer.
 - `#define ERROR_I(value) (int)(value)`: here we take a value and we cast it to an integer.
 - `#define ISERR(value) ((int)value < 0)`: and here we take a value and return true or false depending on if `value` is less than zero or not.
+# 15. Implementing the FAT16 fopen function.
+### 15.1.-1. typo in `kernel.h` (valud) to (value)
+When we defined the error macros, I made a typo. It's a quick fix, though.
+```
+-#define ERROR(valud) (void*)(value)
++#define ERROR(value) (void*)(value)
+```
+### 15.1.0. `fat_item_descriptor` to `fat_file_descriptor`
+And we need to do a little name change to the `fat_item_descriptor` structure and call it `fat_file_descriptor`. Simple as that!
+### 15.1.1. `struct fat_item* fat16_get_directory_entry(struct disk* disk, struct path_part* path)`
+Well gentlemen, this is the moment. Prepare yourselves. Cuz shit is gonna get whacky.
+```
+struct fat_item* fat16_get_directory_entry(struct disk* disk, struct path_part* path)
+{
+        struct fat_private* fat_private = disk->fs_private;
+        struct fat_item* current_item = 0;
+        struct fat_item* root_item
+                = fat16_find_item_in_directory(disk, &fat_private->root_directory, path->part);
 
+        if(!root_item)
+        {
+                goto out;
+        }
+
+        struct path_part* next_part = path->next;
+        current_item = root_item;
+        while(next_part != 0)
+        {
+                if(current_item->type != FAT_ITEM_TYPE_DIRECTORY)
+                {
+                        current_item = 0;
+                        break;
+                }
+                struct fat_item* tmp_item = fat16_find_item_in_directory(disk, current_item->directory, next_part->part);
+                fat16_fat_item_free(current_item);
+                current_item = tmp_item;
+                next_part = next_part->next;
+        }
+out:
+        return current_item;
+
+}
+```
+- `struct fat_item* fat16_get_directory_entry(struct disk* disk, struct path_part* path)`: function definition. we'll take a disk and a path_path structs. this function will get us the directory entry from the FAT table.
+- `        struct fat_private* fat_private = disk->fs_private;`: here we make a struct pointer to the private data.
+- `        struct fat_item* current_item = 0;`: we create an empty `fat_item*` struct.
+- `        struct fat_item* root_item = fat16_find_item_in_directory(disk, &fat_private->root_directory, path->part);`: now we get the first (root) item in the directory. we'll see this function right after this one.
+- `        if(!root_item)`: here we check if the previous call was successful. if not...
+- `                goto out;`: go out out!
+- `        struct path_part* next_part = path->next;`: now we initialize a struct that points to the `next` entry in the `path` argument. 
+- `        current_item = root_item;`: we set the `current_item` to the `root_item`.
+- `        while(next_part != 0)`: we'll run a `while` loop until we have no next entries.
+- `                if(current_item->type != FAT_ITEM_TYPE_DIRECTORY)`: we check if the current item is not a directory. if so, we don't need to keep iterating, since we've found the last item already.
+- `                        current_item = 0;`: we set the `current_item` to zero.
+- `                        break;`: and we break out of the loop.
+- `                struct fat_item* tmp_item = fat16_find_item_in_directory(disk, current_item->directory, next_part->part);`: if we got a directory, we define a `tmp_item` `fat_item` structure that calls `fat16_find_item_in_directory`, passing the `next_part->part` and the `current_item->directory`. we'll see this function later on.
+- `                fat16_fat_item_free(current_item);`: when we called `fat16_find_item_in_directory`, memory was allocated to `root_item`. we free it here. remember, `current_item` holds the values held by `root_item`.
+- `                current_item = tmp_item;`: now we set the current item to `tmp_item`.
+- `                next_part = next_part->next;`: we set the `next_part` to it's `next` member, if any.
+- `out:`: `out` label.
+- `        return current_item;`: and we finally return the `current_item`.
+### 15.1.2. `struct fat_item* fat16_find_item_in_directory(struct disk* disk, struct fat_directory* directory, const char* name)`
+This function is used to get an item in a given directory.
+```
+struct fat_item* fat16_find_item_in_directory(struct disk* disk, struct fat_directory* directory, const char* name)
+{
+        struct fat_item* f_item = 0;
+        char tmp_filename[PEACHOS_MAX_PATH];
+        for(int i = 0; i < directory->total; i++)
+        {
+                fat16_get_full_relative_filename(&directory->item[i], tmp_filename, sizeof(tmp_filename));
+                if(istrncmp(tmp_filename, name, sizeof(tmp_filename)) == 0)
+                {
+                        f_item = fat16_new_fat_item_for_directory_item(disk, &directory->item[i]);
+                }
+        }
+        return f_item;
+}
+```
+- `struct fat_item* fat16_find_item_in_directory(struct disk* disk, struct fat_directory* directory, const char* name)`: function definition. we'll be called with a disk, fat_directory structures and the name of the file.
+- `        struct fat_item* f_item = 0;`: here we initialize `f_item`.
+- `        char tmp_filename[PEACHOS_MAX_PATH];`: and here we make a temporary array of size `PEACHOS_MAX_PATH` (108).
+- `        for(int i = 0; i < directory->total; i++)`: we'll search over the entire directory for a file.
+- `                fat16_get_full_relative_filename(&directory->item[i], tmp_filename, sizeof(tmp_filename));`: here we get the file's full relative name. we'll see this function in a bit.
+- `                if(istrncmp(tmp_filename, name, sizeof(tmp_filename)) == 0)`: we check if `istrncmp` return zero when comparing `tmp_filename` and `name`.
+- `                        f_item = fat16_new_fat_item_for_directory_item(disk, &directory->item[i]);`: if it's a match, we'll get a new FAT item for the directory item for the given item.
+- `        return f_item;`: and we return `f_item`.
+### 15.1.3. `void fat16_get_full_relative_filename(struct fat_directory_item* item, char* out, int max_len)`
+With this function, we'll get the full relative filename of a given `fat_directory_item` and pass it to `out`.
+```
+void fat16_get_full_relative_filename(struct fat_directory_item* item, char* out, int max_len)
+{
+        memset(out, 0x00, max_len);
+        char* out_tmp = out;
+        fat16_to_proper_string(&out_tmp, (const char*) item->filename);
+        if(item->ext[0] != 0x00 && item->ext[0] != 0x20)
+        {
+                *out_tmp++ = '.';
+                fat16_to_proper_string(&out_tmp, (const char*) item->ext);
+        }
+
+}
+```
+- `void fat16_get_full_relative_filename(struct fat_directory_item* item, char* out, int max_len)`: function definition. we'll take a `fat_directory_item*`, a char out pointer and a max length.
+- `        memset(out, 0x00, max_len);`: first we fill the pointer with zeroes until `max_len`.
+- `        char* out_tmp = out;`: we create a temporary pointer to out.
+- `        fat16_to_proper_string(&out_tmp, (const char*) item->filename);`: here we'll load the proper string from the FAT table into the `out_tmp` pointer. we'll see this function more in depth in a bit.
+- `        if(item->ext[0] != 0x00 && item->ext[0] != 0x20)`: we check if the extension isn't null and that the extension isn't a space character either.
+- `                *out_tmp++ = '.';`: we add a `.` (dot) to the name.
+- `                fat16_to_proper_string(&out_tmp, (const char*) item->ext);`: and now we add the extension.
+### 15.1.4. `void fat16_to_proper_string(char** out, const char* in)`
+As mentioned previously, this function is used to get the proper string name of a file or directory from the FAT table.
+```
+void fat16_to_proper_string(char** out, const char* in)
+{
+        while(*in != 0x00 && *in != 0x20)
+        {
+                **out = *in;
+                *out += 1;
+                in += 1;
+        }
+        if(*in == 0x20)
+        {
+                **out = 0x00;
+        }
+
+}
+```
+- `void fat16_to_proper_string(char** out, const char* in)`: function definition. we'll a pointer to a C style string pointer and an `in`, which is a C style string.
+- `        while(*in != 0x00 && *in != 0x20)`: here we check that we aren't at a space character or at a NULL terminator.
+- `                **out = *in;`: we now set the value from `in` to the `out` pointer.
+- `                *out += 1;`: now we increment the pointer by one.
+- `                in += 1;`: and we also increment `in` by one. 
+- `        if(*in == 0x20)`: we check if the `in` pointer has a space. if so...
+- `                **out = 0x00;`: terminate the filename and return to the caller.
+### 15.1.5. `struct fat_item* fat16_new_fat_item_for_directory_item(struct disk* disk, struct fat_directory_item* item)`
+This function creates a FAT item structure out of the FAT directory items found.
+```
+struct fat_item* fat16_new_fat_item_for_directory_item(struct disk* disk, struct fat_directory_item* item)
+{
+        struct fat_item* f_item = kzalloc(sizeof(struct fat_item));
+        if(!f_item)
+        {
+                return 0;
+        }
+
+        if(item->attribute & FAT_FILE_SUBDIRECTORY)
+        {
+                f_item->directory = fat16_load_fat_directory(disk, item);
+                f_item->type = FAT_ITEM_TYPE_DIRECTORY;
+        }
+        f_item->type = FAT_ITEM_TYPE_FILE;
+        f_item->item = fat16_clone_directory_item(item, sizeof(struct fat_directory_item));
+        return f_item;
+
+}
+```
+- `struct fat_item* fat16_new_fat_item_for_directory_item(struct disk* disk, struct fat_directory_item* item)`: function definition. it takes a disk and a fat_directory_item structures.
+- `        struct fat_item* f_item = kzalloc(sizeof(struct fat_item));`: first we allocate memory for the `fat_item` that we'll pass return.
+- `        if(!f_item)`: here we check if the `f_item` was allocated or not. if not...
+- `                return 0;`: we return zero.
+- `        if(item->attribute & FAT_FILE_SUBDIRECTORY)`: now we check if the `item` passed onto us has the subdirectory attributes. we use an `AND` operation because it'll return true if the `attribute` member has the bitmask `FAT_FILE_SUBDIRECTORY`. and if so...
+- `                f_item->directory = fat16_load_fat_directory(disk, item);`: we load a FAT directory. we'll see this function right after this one.
+- `                f_item->type = FAT_ITEM_TYPE_DIRECTORY;`: and we set the type of the item to a directory.
+- `        f_item->type = FAT_ITEM_TYPE_FILE;`: if the condition wasn't met, we then set the item type to a file.
+- `        f_item->item = fat16_clone_directory_item(item, sizeof(struct fat_directory_item));`: and we clone the item. we do this because we don't know if we have memory allocated for it on our heap. we'll see this function after `fat16_load_fat_directory`.
+- `        return f_item;`: and we return the item.
+### 15.1.6. `struct fat_directory* fat16_load_fat_directory(struct disk* disk, struct fat_directory_item* item)`
+As said before, this function loads the directory from the FAT into the struct.
+```
+struct fat_directory* fat16_load_fat_directory(struct disk* disk, struct fat_directory_item* item)
+{
+        int res = 0;
+        struct fat_directory* directory = 0;
+        struct fat_private* private = disk->fs_private;
+        if (!(item->attribute & FAT_FILE_SUBDIRECTORY))
+        {
+                res = -EINVARG;
+                goto out;
+        }
+
+        directory = kzalloc(sizeof(struct fat_directory));
+        if (!directory)
+        {
+                res = -ENOMEM;
+                goto out;
+        }
+
+        int cluster = fat16_get_first_cluster(item);
+        int cluster_sector = fat16_cluster_to_sector(private, cluster);
+        int total_items = fat16_get_total_items_per_directory(disk, cluster_sector);
+        directory->total = total_items;
+        int directory_size = directory->total * sizeof(struct fat_directory_item);
+        directory->item = kzalloc(directory_size);
+        if(!directory->item)
+        {
+                res = -ENOMEM;
+                goto out;
+        }
+        res = fat16_read_internal(disk, cluster, 0x00, directory_size, directory->item);
+        if (res != PEACHOS_ALLOK)
+        {
+                goto out;
+        }
+
+
+out:
+        if (res != PEACHOS_ALLOK)
+        {
+                fat16_free_directory(directory);
+        }
+        return directory;
+}
+```
+- `struct fat_directory* fat16_load_fat_directory(struct disk* disk, struct fat_directory_item* item)`: function definition. we'll take a disk and a `fat_directory_item`.
+- `        int res = 0;`: here we set an initial return value.
+- `        struct fat_directory* directory = 0;`: we initialize a `fat_directory`.
+- `        struct fat_private* private = disk->fs_private;`: and we access the `fs_private`.
+- `        if (!(item->attribute & FAT_FILE_SUBDIRECTORY))`: here we check if the `item` doesn't have the subdirectory attribute. if not...
+- `                res = -EINVARG;`: we set the return value to `-EINVARG`.
+- `                goto out;`: and we goto `out`.
+- `        directory = kzalloc(sizeof(struct fat_directory));`: now we zero allocate memory for the structure.
+- `        if (!directory)`: now we check for allocation issues. if something happened...
+- `                res = -ENOMEM;`: we throw an `-ENOMEM`.
+- `                goto out;`: and return.
+- `        int cluster = fat16_get_first_cluster(item);`: now we get the first cluster of the item. we'll see this function after `fat16_clone_directory_item`.
+- `        int cluster_sector = fat16_cluster_to_sector(private, cluster);`: and now we get the sector value of the cluster. 
+- `        int total_items = fat16_get_total_items_per_directory(disk, cluster_sector);`: and we get the total amount of items in the directory using the sector value of the cluster.
+- `        directory->total = total_items;`: and we set the total items of the directory.
+- `        int directory_size = directory->total * sizeof(struct fat_directory_item);`: now we get the total size of the directory. we multiply the `total` value with the size of `fat_directory_item`.
+- `        directory->item = kzalloc(directory_size);`: now we allocate memory for the items.
+- `        if(!directory->item)`: now we check for allocation issues. if something happened...
+- `                res = -ENOMEM;`: we throw an `-ENOMEM`.
+- `                goto out;`: and return.
+- `        res = fat16_read_internal(disk, cluster, 0x00, directory_size, directory->item);`: and we go to the `fat16_read_internal`. this is one of the main and most important function of the `fat16_fopen` code. we'll see it at the end.
+- `        if (res != PEACHOS_ALLOK)`: we check if `res` isn't ALLOK. if not...
+- `                goto out;`: we go to out.
+- `out:`: `out` label.
+- `        if (res != PEACHOS_ALLOK)`: we check `res` again. if not OK...
+- `                fat16_free_directory(directory);`: we free the directory. we'll see this at the end, too.
+- `        return directory;`: and we return the directory.
+### 15.1.7. `struct fat_directory_item* fat16_clone_directory_item(struct fat_directory_item* item, int size)`
+This function clones the `fat_directory_item` structure passed to it and returns a new, although equal (of *n* bytes), structure to the caller.
+```
+struct fat_directory_item* fat16_clone_directory_item(struct fat_directory_item* item, int size)
+{
+        struct fat_directory_item* item_copy = 0;
+        if (size < sizeof(struct fat_directory_item))
+        {
+                return 0;
+        }
+        item_copy = kzalloc(size);
+        if (!item_copy)
+        {
+                return 0;
+        }
+        memcpy(item_copy, item, size);
+
+        return item_copy;
+
+}
+```
+- `struct fat_directory_item* fat16_clone_directory_item(struct fat_directory_item* item, int size)`: function definition.
+- `        struct fat_directory_item* item_copy = 0;`: here we create the item copy, which is the value we'll return.
+- `        if (size < sizeof(struct fat_directory_item))`: we check if the size is less than the `fat_directory_item` struct. if it was less than the FAT directory item struct, then we couldn't clone it, since it wouldn't fit.
+- `                return 0;`: and we return 0.
+- `        item_copy = kzalloc(size);`: now we allocate the memory in the heap and zero it out.
+- `        if (!item_copy)`: we check for memory allocation issues. if any...
+- `                return 0;`: we return 0.
+- `        memcpy(item_copy, item, size);`: now we copy the `item` into the `item_copy` structure.
+- `        return item_copy;`: and we return a new, memory allocated and equal `fat_directory_item` to the caller.
+
+### 15.1.8. `static uint32_t fat16_get_first_cluster(struct fat_directory_item* item)`
+As mentioned previously and as stated in the function name, this function looks up the cluster of the `fat_directory_item` structure passed to it.
+```
+static uint32_t fat16_get_first_cluster(struct fat_directory_item* item)
+{
+        return (item->high_16_bits_first_cluster) | item->low_16_bits_first_cluster;
+}
+```
+- `static uint32_t fat16_get_first_cluster(struct fat_directory_item* item)`: function definition.
+- `        return (item->high_16_bits_first_cluster) | item->low_16_bits_first_cluster;`: we take both high and low bits of the first cluster and join them with an `OR` operation.
+	- this is wrong. we'll we see why this is wrong later on. try to think about why it's wrong for now :) (ps: it's related to bit alignment)
+### 15.1.9. `static int fat16_cluster_to_sector(struct fat_private* private, int cluster)`
+This function will take the cluster byte address and convert it to a sector value. The struct access gets kinda crazy, but when you get the hang of it, it ain't that hard.
+```
+static int fat16_cluster_to_sector(struct fat_private* private, int cluster)
+{
+        return private->root_directory.ending_sector_pos + ((cluster - 2) * private->header.primary_header.sectors_per_cluster);
+}
+```
+- `static int fat16_cluster_to_sector(struct fat_private* private, int cluster)`: function definition. we'll take the `cluster` from the previous function, and the `fat_private`, which can be passed onto us by the `disk->fs_private` member.
+- `        return private->root_directory.ending_sector_pos + ((cluster - 2) * private->header.primary_header.sectors_per_cluster);`: and we return the `ending_sector_pos` plus the cluster `- 2` multiplied by the `sectors_per_clusters`.
+	- it isn't really specified the reason as to why we do `cluster - 2` in the official [spec](https://academy.cba.mit.edu/classes/networking_communications/SD/FAT.pdf). nevertheless, i think this is related to the first and second `sectors` in the disk. which, remember, are the boot sector and the FAT tables.
+### 15.1.10. `static int fat16_read_internal(struct disk* disk, int starting_cluster, int offset, int total, void* out)`
+This function is THE BEGINNING OF THE END... not really. But it's going to get more complex as we continue. Let's go!
+```
+static int fat16_read_internal(struct disk* disk, int starting_cluster, int offset, int total, void* out)
+{
+        struct fat_private* private = disk->fs_private;
+        struct disk_stream* stream = private->cluster_read_stream;
+        return fat16_read_internal_from_stream(disk, stream, starting_cluster, offset, total, out);
+}
+```
+- `static int fat16_read_internal(struct disk* disk, int starting_cluster, int offset, int total, void* out)`: function definition. this is one of the main functions, since here's where we'll do the actual reading.
+- `        struct fat_private* private = disk->fs_private;`: we access the `fs_private`.
+- `        struct disk_stream* stream = private->cluster_read_stream;`: and the `cluster_read_stream`.
+- `        return fat16_read_internal_from_stream(disk, stream, starting_cluster, offset, total, out);`: and we call the actual read, `fat16_read_internal_from_stream`.
+### 15.1.11. `static int fat16_read_internal_from_stream(struct disk* disk, struct disk_stream* stream, int cluster, int offset, int total, void* out)`
+Let's continue.
+```
+static int fat16_read_internal_from_stream(struct disk* disk, struct disk_stream* stream, int cluster, int offset, int total, void* out)
+{
+        int res = 0;
+        struct fat_private* private = disk->fs_private;
+        int size_of_cluster_bytes = private->header.primary_header.sectors_per_cluster * disk->sector_size;
+        int cluster_to_use = fat16_get_cluster_for_offset(disk, cluster, offset);
+        if (cluster_to_use < 0)
+        {
+                res = cluster_to_use;
+                goto out;
+        }
+
+        int offset_from_cluster = offset % size_of_cluster_bytes;
+        int starting_sector = fat16_cluster_to_sector(private, cluster_to_use);
+        int starting_pos = (starting_sector * disk->sector_size) * offset_from_cluster;
+        int total_to_read = total > size_of_cluster_bytes ? size_of_cluster_bytes : total;
+
+        res = diskstreamer_seek(stream, starting_pos);
+        if(res != PEACHOS_ALLOK)
+        {
+                goto out;
+        }
+        res = diskstreamer_read(stream, out, total_to_read);
+        if (res != PEACHOS_ALLOK)
+        {
+                goto out;
+        }
+        total -= total_to_read;
+        if (total > 0)
+        {
+                res = fat16_read_internal_from_stream(disk, stream, cluster, offset+total_to_read, total, out + total_to_read);
+        }
+out:
+        return res;
+}
+```
+- `static int fat16_read_internal_from_stream(struct disk* disk, struct disk_stream* stream, int cluster, int offset, int total, void* out)`: this function is quite similar to the one we implemented in the `diskstreamer_read` code. you'll see why in just a second.
+- `        int res = 0;`: initial return value.
+- `        struct fat_private* private = disk->fs_private;`: accessing the `fs_private`.
+- `        int size_of_cluster_bytes = private->header.primary_header.sectors_per_cluster * disk->sector_size;`: now we get the total amount of bytes contained in a single cluster.
+- `        int cluster_to_use = fat16_get_cluster_for_offset(disk, cluster, offset);`: we calculate the cluster offset. we'll see this function right after this one.
+- `        if (cluster_to_use < 0)`: we check if it's less than zero. if it is...
+- `                res = cluster_to_use;`: we set `res` to the `cluster_to_use` value.
+- `                goto out;`: and we go to out.
+- `        int offset_from_cluster = offset % size_of_cluster_bytes;`: now we calculate the offset for the seek function. it's as simple as using the mod operand with both `offset` (passed in the function args) and the `size_of_cluster_bytes`. 
+- `        int starting_sector = fat16_cluster_to_sector(private, cluster_to_use);`: here we calculate the starting sector. we use the cluster to sector function for this.
+- `        int starting_pos = (starting_sector * disk->sector_size) * offset_from_cluster;`: now we get the starting position. we do this by multiplying the sector size by the starting sector, and then multiplying it by the offset.
+- `        int total_to_read = total > size_of_cluster_bytes ? size_of_cluster_bytes : total;`: ternary operation. if the total is higher than the cluster byte size, we'll use the cluster byte size. if not, we'll use the total.
+	- we do this because we can read only one cluster at a time.
+- `        res = diskstreamer_seek(stream, starting_pos);`: now we seek to the starting position.
+- `        if(res != PEACHOS_ALLOK)`: we check the status of the seek. if something went wrong..
+- `                goto out;`: we go to out.
+- `        res = diskstreamer_read(stream, out, total_to_read);`: now we read.
+- `        if (res != PEACHOS_ALLOK)`: if something went wrong while reading...
+- `                goto out;`: we go to out.
+- `        total -= total_to_read;`: now we substract the `total_to_read` value from `total`.
+- `        if (total > 0)`: if total is HIGHER than zero...
+- `                res = fat16_read_internal_from_stream(disk, stream, cluster, offset+total_to_read, total, out + total_to_read);`: we recurse and run again! check `diskstreamer_read`, it's kinda similar :)
+- `out:`: `out` label.
+- `        return res;`: and we return!
+### 15.1.12. `static int fat16_get_cluster_for_offset(struct disk* disk, int starting_cluster, int offset)`
+Hey! Congratulations if you've got this far. We just have two more hard function to go! Keep going! This function will help us get the cluster for offset.
+```
+static int fat16_get_cluster_for_offset(struct disk* disk, int starting_cluster, int offset)
+{
+        int res = 0;
+        struct fat_private* private = disk->fs_private;
+        int size_of_cluster_bytes = private->header.primary_header.sectors_per_cluster * disk->sector_size;
+        int cluster_to_use = starting_cluster;
+        int clusters_ahead = offset / size_of_cluster_bytes;
+        for (int i = 0; i < clusters_ahead; i++)
+        {
+                int entry = fat16_get_fat_entry(disk, cluster_to_use);
+                if (entry == 0xFF8 || entry == 0xFFF)
+                {
+                        // last entry in file
+                        res = -EIO;
+                        goto out;
+                }
+                // is sector bad?
+                if (entry == PEACHOS_FAT16_BAD_SECTOR)
+                {
+                        res = -EIO;
+                        goto out;
+                }
+                if (entry == 0xFF0 || entry == 0xFF6)
+                {
+                        res = -EIO;
+                        goto out;
+                }
+                if (entry == 0x00)
+                {
+                        res = -EIO;
+                        goto out;
+                }
+
+                cluster_to_use = entry;
+        }
+        res = cluster_to_use;
+out:
+        return res;
+}
+```
+- `static int fat16_get_cluster_for_offset(struct disk* disk, int starting_cluster, int offset)`: function definition.
+- `        int res = 0;`: return value initialization.
+- `        struct fat_private* private = disk->fs_private;`: `fat_private` access.
+- `        int size_of_cluster_bytes = private->header.primary_header.sectors_per_cluster * disk->sector_size;`: first we calculate the size of the clusters in bytes.
+- `        int cluster_to_use = starting_cluster;`: now we create a variable that holds the value of `starting_cluster`.
+- `        int clusters_ahead = offset / size_of_cluster_bytes;`: and we calculate the clusters ahead by dividing the offset passed onto us and the size of clusters in bytes.
+- `        for (int i = 0; i < clusters_ahead; i++)`: we'll run until `i` is less than `clusters_ahead`.
+- `                int entry = fat16_get_fat_entry(disk, cluster_to_use);`: here we get a FAT entry. this function will be explained below this one.
+- `                if (entry == 0xFF8 || entry == 0xFFF)`: we check if `entry` has `0xFF8` or `0xFFF`. meaning that we're checking that we aren't accessing a reserved cluster nor a end of file cluster. if we are...
+- `                        res = -EIO;`: we return `-EIO`.
+- `                        goto out;`: and we go to out.
+- `                if (entry == PEACHOS_FAT16_BAD_SECTOR)`: now we check if we're accessing a bad sector.
+- `                        res = -EIO;`: we return `-EIO`.
+- `                        goto out;`: and we go to out.
+- `                if (entry == 0xFF0 || entry == 0xFF6)`: and now we check if we're accessing a reserved sector. (0xFF0-6, 0xFF8-0xFFE all indicate reserved sectors, but the latter might also indicate end of file). if we are accessing a reserved sector...
+- `                        res = -EIO;`: we return `-EIO`.
+- `                        goto out;`: and we go to out.
+- `                if (entry == 0x00)`: if we're accessing a free sector...
+- `                        res = -EIO;`: we return `-EIO`.
+- `                        goto out;`: and we go to out.
+- `                cluster_to_use = entry;`: and after all that, we get the cluster to use. and repeat :)
+- `        res = cluster_to_use;`: we set `res` to the cluster to use.
+- `out:`: `out` label.
+- `        return res;`: and we return `res`.
+### 15.1.13. `static int fat16_get_fat_entry(struct disk* disk, int cluster)`
+One more function to go. This one is used to get a FAT entry.
+```
+static int fat16_get_fat_entry(struct disk* disk, int cluster)
+{
+        int res = -1;
+
+        struct fat_private* private = disk->fs_private;
+        struct disk_stream* stream = private->fat_read_stream;
+        if(!stream)
+        {
+                goto out;
+        }
+        uint32_t fat_table_position = fat16_get_first_fat_sector(private) * disk->sector_size;
+
+        res = diskstreamer_seek(stream, fat_table_position * (cluster * PEACHOS_FAT16_FAT_ENTRY_SIZE));
+        if(res < 0)
+        {
+                goto out;
+        }
+        uint16_t result = 0;
+        res = diskstreamer_read(stream, &result, sizeof(result));
+        if (res < 0)
+        {
+                goto out;
+        }
+
+        res = result;
+out:
+        return res;
+}
+```
+- `static int fat16_get_fat_entry(struct disk* disk, int cluster)`: function definition.
+- `        int res = -1;`: initial return value.
+- `        struct fat_private* private = disk->fs_private;`: accesing the `fs_private`.
+- `        struct disk_stream* stream = private->fat_read_stream;`: and accessing the `fat_read_stream` streamer.
+- `        if(!stream)`: we check if the streamer was actually created beforehand. if not...
+- `                goto out;`: we go to out.
+- `        uint32_t fat_table_position = fat16_get_first_fat_sector(private) * disk->sector_size;`: we use the get first FAT sector to, well, get the first usable FAT sector and we multiply it by the sector size, as to obtain the sector in bytes instead of a sector number.
+- `        res = diskstreamer_seek(stream, fat_table_position * (cluster * PEACHOS_FAT16_FAT_ENTRY_SIZE));`: here we seek up to the `fat_table_position` multiplied by the cluster size, which is multiplied by the FAT entry size.
+- `        if(res < 0)`: if something went wrong...
+- `                goto out;`: goto out.
+- `        uint16_t result = 0;`: we set an initial result., in which we'll read the FAT entry to.
+- `        res = diskstreamer_read(stream, &result, sizeof(result));`: here we read the FAT entry into the `result` variable.
+- `        if (res < 0)`: if something went wrong...
+- `                goto out;`: goto out.
+- `        res = result;`: and we set `res` to `result`.
+- `out:`: `out` label.
+- `        return res;`: and return `res`!
+### 15.1.14. `static uint32_t fat16_get_first_fat_sector(struct fat_private* private)`
+All this function does is return the number of reserved sectors. This is useful, as the number will also indicate the first usable sector.
+```
+static uint32_t fat16_get_first_fat_sector(struct fat_private* private)
+{
+        return private->header.primary_header.reserved_sectors;
+}
+```
+- `static uint32_t fat16_get_first_fat_sector(struct fat_private* private)`: function definition.
+- `        return private->header.primary_header.reserved_sectors;`: we return te `reserved_sectors` value.
+### 15.1.15. `void fat16_free_directory(struct fat_directory* directory)`
+This function frees the memory allocated by the other functions. It frees directories and the items contained by the directories. This isn't deleting stuff from the disk, but rather deallocating the structures from the heap.
+```
+void fat16_free_directory(struct fat_directory* directory)
+{
+        if(!directory)
+        {
+                return;
+        }
+        if(directory->item)
+        {
+                kfree(directory->item);
+        }
+        kfree(directory);
+}
+```
+- `void fat16_free_directory(struct fat_directory* directory)`: function definition.
+- `        if(!directory)`: if we didn't get an initialized directory...
+- `                return;`: we return nothing.
+- `        if(directory->item)`: if the directory has items...
+- `                kfree(directory->item);`: we free them!
+- `        kfree(directory);`: and we free the directory.
+### 15.1.16. `void fat16_fat_item_free(struct fat_item* item)`
+Same here, but with items instead of directories.
+```
+void fat16_fat_item_free(struct fat_item* item)
+{
+        if(item->type == FAT_ITEM_TYPE_DIRECTORY)
+        {
+                fat16_free_directory(item->directory);
+        }
+        else if (item->type == FAT_ITEM_TYPE_FILE)
+        {
+                kfree(item->item);
+        }
+        kfree(item);
+}
+```
+- `void fat16_fat_item_free(struct fat_item* item)`: function definition.
+- `        if(item->type == FAT_ITEM_TYPE_DIRECTORY)`: we check if the item type is of a directory. if it is...
+- `                fat16_free_directory(item->directory);`: we call the free directory function.
+- `        else if (item->type == FAT_ITEM_TYPE_FILE)`: if it is a file...
+- `                kfree(item->item);`: we free it!
+- `        kfree(item);`: and we free the initial structure.
+### 15.1.17. `void* fat16_fopen(struct disk* disk, struct path_part* path, FILE_MODE mode)`
+Some modifications were made to the main `fopen` call. This is the last function of the day, so congratulations! You've made it. I'm quite proud of you.
+```
+void* fat16_fopen(struct disk* disk, struct path_part* path, FILE_MODE mode)
+{
+        if( mode != FILE_MODE_READ)
+        {
+                return ERROR(-ERDONLY);
+        }
+        struct fat_file_descriptor* descriptor = 0;
+        descriptor = kzalloc(sizeof(struct fat_file_descriptor));
+        if(!descriptor)
+        {
+                return ERROR(-ENOMEM);
+        }
+
+        descriptor->item = fat16_get_directory_entry(disk, path);
+        if(!descriptor->item)
+        {
+                return ERROR(-EIO);
+        }
+
+        descriptor->pos = 0;
+        return descriptor;
+}
+```
+- `void* fat16_fopen(struct disk* disk, struct path_part* path, FILE_MODE mode)`: function definition.
+- `        if( mode != FILE_MODE_READ)`: we check if we're being asked to read. if not (since we haven't made any write operations yet)...
+- `                return ERROR(-ERDONLY);`: we return an error.
+- `        struct fat_file_descriptor* descriptor = 0;`: now we initialize a file descriptor.
+- `        descriptor = kzalloc(sizeof(struct fat_file_descriptor));`: and we zero allocate it.
+- `        if(!descriptor)`: we check if we were correctly allocated. if not...
+- `                return ERROR(-ENOMEM);`: we return an error.
+- `        descriptor->item = fat16_get_directory_entry(disk, path);`: now we start the execution.
+- `        if(!descriptor->item)`: we check if the item was returned. if not...
+- `                return ERROR(-EIO);`: there was a problem, so we return an error.
+- `        descriptor->pos = 0;`: we set the descriptor position to zero.
+- `        return descriptor;`: and we return it.
+And that's it! Although this is just the beginning of the FAT filesystem, we've made a lot of work together. Now, as a simple demonstration, we'll try our `fopen`.
+
+![fopen demo](https://github.com/4nt11/theos/blob/main/media/fopen1.png)
