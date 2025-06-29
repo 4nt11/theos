@@ -35,15 +35,15 @@ int tonumericdigit(char c)
 	return c - 48;
 }
 
-void* memcpy(void* src, void *dst, size_t size)
+void* memcpy(void* dest, void* src, int len)
 {
-	char* src_ptr = (char*)src;
-	char* dst_ptr = (char*)dst;
-	for (int i = 0; i < size; i++)
-	{
-		dst_ptr[i] = src_ptr[i];
-	}
-	return dst;
+    char *d = dest;
+    char *s = src;
+    while(len--)
+    {
+        *d++ = *s++;
+    }
+    return dest;
 }
 
 char* strcpy(char* dest, const char* src)

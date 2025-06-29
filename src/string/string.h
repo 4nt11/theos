@@ -4,7 +4,7 @@
 #include <stdbool.h>
 
 int strlen(const char* ptr);
-void* memcpy(void* src, void *dst, size_t size);
+void* memcpy(void* dest, void *src, int len);
 bool isdigit(char c);
 int tonumericdigit(char c);
 int strnlen(const char* ptr, int max);
