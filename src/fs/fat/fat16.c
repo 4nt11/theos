@@ -125,6 +125,7 @@ void* fat16_fopen(struct disk* disk, struct path_part* path, FILE_MODE mode);
 int fat16_resolve(struct disk* disk);
 int fat16_seek(void* private, uint32_t offset, FILE_SEEK_MODE seek_mode);
 int fat16_fstat(struct disk* disk, void* private, struct file_stat* stat);
+int fat16_close(void* private);
 
 struct filesystem fat16_fs =
 {
@@ -132,7 +133,8 @@ struct filesystem fat16_fs =
 	.open = fat16_fopen,
 	.read = fat16_read,
 	.seek = fat16_seek,
-	.stat = fat16_fstat
+	.stat = fat16_fstat,
+	.close = fat16_close
 };
 
 struct filesystem* fat16_init()
@@ -704,3 +706,16 @@ int fat16_fstat(struct disk* disk, void* private, struct file_stat* stat)
 out:
 	return res;
 }
+
+static void fat16_free_file_descriptor(struct fat_file_descriptor* desc)
+{
+	fat16_fat_item_free(desc->item);
+	kfree(desc);
+}
+
+int fat16_close(void* private)
+{
+	fat16_free_file_descriptor((struct fat_file_descriptor*) private);
+	return 0;
+}
+
