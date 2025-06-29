@@ -166,7 +166,7 @@ int fopen(const char* filename, const char* mode_string)
 		goto out;
 	}
 	desc->filesystem = disk->filesystem;
-	desc->private = disk->fs_private;
+	desc->private = descriptor_private_data;
 	desc->disk = disk;
 	res = desc->index;
 
