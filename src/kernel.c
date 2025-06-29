@@ -92,12 +92,17 @@ void kernel_main()
 	enable_paging();
 	// enabling interrupts
 	enable_interrupts();
-
+	
 	int fd = fopen("0:/hello.txt", "r");
 	if(fd)
 	{
-		print("hello is opeend!");
+		print("fd!\n");
+		char buf[21];
+		fread(buf, 19, 1, fd);
+		buf[20] = 0x00;
+		print(buf);
 	}
+
 
 	while(1) {}
 }
