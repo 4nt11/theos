@@ -97,7 +97,10 @@ void kernel_main()
 	if(fd)
 	{
 		struct file_stat s;
+		char out[10];
+		fread(out, 10, 1, fd);
 		fstat(fd, &s);
+		fclose(fd);
 		print("stat yay!");
 	}
 
