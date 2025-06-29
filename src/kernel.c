@@ -97,9 +97,10 @@ void kernel_main()
 	if(fd)
 	{
 		print("fd!\n");
-		char buf[21];
-		fread(buf, 19, 1, fd);
-		buf[20] = 0x00;
+		char buf[20];
+		fseek(fd, 6, SEEK_SET);
+		fread(buf, 16, 1, fd);
+		buf[19] = 0x00;
 		print(buf);
 	}
 
