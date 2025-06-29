@@ -230,3 +230,18 @@ int fstat(int fd, struct file_stat* stat)
 out:
 	return res;
 }
+
+int fclose(int fd)
+{
+	int res = 0;
+	struct file_descriptor* descriptor = file_get_descriptor(fd);
+	if(!descriptor)
+	{
+		res = -EIO;
+		goto out;
+	}
+	res = descriptor->filesystem->close(descriptor->private);
+
+out:
+	return res;
+}
