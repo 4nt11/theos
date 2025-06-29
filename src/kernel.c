@@ -69,6 +69,12 @@ void print(const char* str)
 	}
 }
 
+static void panic(const char* msg)
+{
+	print(msg);
+	while(1) { }
+}
+
 static struct paging_4gb_chunk* kernel_chunk = 0;
 void kernel_main()
 {
@@ -94,6 +100,7 @@ void kernel_main()
 	enable_interrupts();
 	
 	int fd = fopen("0:/hello.txt", "r");
+	panic("no!!! no file!!");
 	if(fd)
 	{
 		struct file_stat s;
