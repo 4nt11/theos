@@ -215,3 +215,18 @@ int fseek(int fd, int offset, FILE_SEEK_MODE whence)
 out:
 	return res;
 }
+
+int fstat(int fd, struct file_stat* stat)
+{
+	int res = 0;
+	struct file_descriptor* desc = file_get_descriptor(fd);
+	if (!desc)
+	{
+		res = -EIO;
+		goto out;
+	}
+	res = desc->filesystem->stat(desc->disk, desc->private, stat);
+
+out:
+	return res;
+}
