@@ -35,6 +35,6 @@
 #define PEACHOS_MAX_PATH 108
 
 // number of segments
-#define PEACHOS_TOTAL_GDT_SEGMENTS 3
+#define PEACHOS_TOTAL_GDT_SEGMENTS 6
 
 #endif
