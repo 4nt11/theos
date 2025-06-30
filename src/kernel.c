@@ -14,7 +14,9 @@
 #include "string/string.h"
 #include "disk/streamer.h"
 #include "gdt/gdt.h"
+#include "task/tss.h"
 #include "config.h"
+#include "debug/debug.h"
 
 
 uint16_t* video_mem = 0;
@@ -79,11 +81,15 @@ void panic(const char* msg)
 }
 
 
+struct tss tss;
 struct gdt gdt_real[PEACHOS_TOTAL_GDT_SEGMENTS];
 struct gdt_structured gdt_structured[PEACHOS_TOTAL_GDT_SEGMENTS] = {
-	{ .base = 0x00, .limit = 0x00, .type = 0x00 }, // NULL segment
-	{ .base = 0x00, .limit = 0xFFFFFFFF, .type = 0x9a }, // kernel code segment
-	{ .base = 0x00, .limit = 0xFFFFFFFF, .type = 0x92  }
+	{ .base = 0x00, .limit = 0x00, .type = 0x00 }, 					// NULL segment
+	{ .base = 0x00, .limit = 0xFFFFFFFF, .type = 0x9A }, 			// kernel code segment
+	{ .base = 0x00, .limit = 0xFFFFFFFF, .type = 0x92  }, 			// kernel data segment
+	{ .base = 0x00, .limit = 0xFFFFFFFF, .type = 0xF8 }, 			// user code segment
+	{ .base = 0x00, .limit = 0xFFFFFFFF, .type = 0xF2 }, 			// user data segment
+	{ .base = (uint32_t)&tss, .limit = sizeof(tss), .type = 0xE9 } 	// TSS segment
 };
 
 static struct paging_4gb_chunk* kernel_chunk = 0;
@@ -93,7 +99,13 @@ void kernel_main()
 	terminal_initialize();
 	print("[*] hello!\n");
 	print("[*] booting up...\n");
-	
+
+	// TSS setup
+	memset(&tss, 0x00, sizeof(tss));
+	tss.esp0 = 0x600000;
+	tss.ss0 = KERNEL_DATA_SELECTOR;
+
+	// GDT setup
 	memset(gdt_real, 0x00, sizeof(gdt_real));
 
 	// GDT structured to CPU GDT
@@ -101,6 +113,9 @@ void kernel_main()
 
 	// load the GDT
 	gdt_load(gdt_real, sizeof(gdt_real));
+
+	// TSS Load
+	tss_load(0x28);
 
 	// idt init
 	idt_init();
