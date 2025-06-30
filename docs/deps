@@ -1,0 +1,11 @@
+# deps for the build script
+
+if you ever want to build the docs into a pdf, you'll need the following deps:
+
+- pandoc 
+- texlive-latex-base
+- texlive-fonts-recommended
+- texlive-extra-utils
+- texlive-latex-extra
+- groff
+- ghostscript
