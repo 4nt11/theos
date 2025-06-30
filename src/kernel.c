@@ -13,6 +13,9 @@
 #include "fs/pparser.h"
 #include "string/string.h"
 #include "disk/streamer.h"
+#include "gdt/gdt.h"
+#include "config.h"
+
 
 uint16_t* video_mem = 0;
 uint16_t terminal_row = 0;
@@ -69,21 +72,38 @@ void print(const char* str)
 	}
 }
 
-static void panic(const char* msg)
+void panic(const char* msg)
 {
 	print(msg);
 	while(1) { }
 }
+
+
+struct gdt gdt_real[PEACHOS_TOTAL_GDT_SEGMENTS];
+struct gdt_structured gdt_structured[PEACHOS_TOTAL_GDT_SEGMENTS] = {
+	{ .base = 0x00, .limit = 0x00, .type = 0x00 }, // NULL segment
+	{ .base = 0x00, .limit = 0xFFFFFFFF, .type = 0x9a }, // kernel code segment
+	{ .base = 0x00, .limit = 0xFFFFFFFF, .type = 0x92  }
+};
 
 static struct paging_4gb_chunk* kernel_chunk = 0;
 void kernel_main()
 {
 	// screen init stuff
 	terminal_initialize();
-	// idt init
-	idt_init();
 	print("[*] hello!\n");
 	print("[*] booting up...\n");
+	
+	memset(gdt_real, 0x00, sizeof(gdt_real));
+
+	// GDT structured to CPU GDT
+	gdt_structured_to_gdt(gdt_real, gdt_structured, PEACHOS_TOTAL_GDT_SEGMENTS);
+
+	// load the GDT
+	gdt_load(gdt_real, sizeof(gdt_real));
+
+	// idt init
+	idt_init();
 	// memory related init
 	kheap_init();
 	// fs init
@@ -98,9 +118,8 @@ void kernel_main()
 	enable_paging();
 	// enabling interrupts
 	enable_interrupts();
-	
+
 	int fd = fopen("0:/hello.txt", "r");
-	panic("no!!! no file!!");
 	if(fd)
 	{
 		struct file_stat s;
