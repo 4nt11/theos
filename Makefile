@@ -2,7 +2,7 @@ FILES = ./build/kernel.asm.o ./build/kernel.o ./build/idt/idt.asm.o ./build/idt/
 	./build/io/io.asm.o ./build/memory/heap/heap.o ./build/memory/heap/kheap.o ./build/memory/paging/paging.o \
 	./build/memory/paging/paging.asm.o ./build/debug/debug.o ./build/disk/disk.o ./build/string/string.o \
 	./build/fs/pparser.o ./build/disk/streamer.o ./build/fs/file.o ./build/fs/fat/fat16.o ./build/gdt/gdt.o \
-	./build/gdt/gdt.asm.o
+	./build/gdt/gdt.asm.o ./build/task/tss.asm.o
 
 github: FLAGS += -fno-pie
 INCLUDES= -I./src
@@ -26,9 +26,6 @@ all: ./bin/kernel.bin ./bin/boot.bin
 
 ./build/kernel.asm.o: ./src/kernel.asm
 	nasm -f elf -g ./src/kernel.asm -o ./build/kernel.asm.o
-
-./build/gdt/gdt.asm.o: ./src/gdt/gdt.asm
-	nasm -f elf -g ./src/gdt/gdt.asm -o ./build/gdt/gdt.asm.o
 
 ./build/kernel.o: ./src/kernel.c
 	i686-elf-gcc $(INCLUDES) $(FLAGS) -std=gnu99 -c ./src/kernel.c -o ./build/kernel.o
@@ -77,6 +74,15 @@ all: ./bin/kernel.bin ./bin/boot.bin
 
 ./build/gdt/gdt.o: ./src/gdt/gdt.c
 	i686-elf-gcc $(INCLUDES) -I./src/gdt/ $(FLAGS) -std=gnu99 -c ./src/gdt/gdt.c -o ./build/gdt/gdt.o
+
+./build/gdt/gdt.asm.o: ./src/gdt/gdt.asm
+	nasm -f elf -g ./src/gdt/gdt.asm -o ./build/gdt/gdt.asm.o
+
+#./build/task/task.o: ./src/gdt/gdt.c
+	#i686-elf-gcc $(INCLUDES) -I./src/gdt/ $(FLAGS) -std=gnu99 -c ./src/gdt/gdt.c -o ./build/gdt/gdt.o
+
+./build/task/tss.asm.o: ./src/task/tss.asm
+	nasm -f elf -g ./src/task/tss.asm -o ./build/task/tss.asm.o
 
 # not working as of right now.
 ./build/debug/debug.o: ./src/debug/debug.c
