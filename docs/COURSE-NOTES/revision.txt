@@ -1,21 +1,169 @@
 pagina | referencia    | cuantas
 
-2	description	3
+5       Setup           2
 
-3	Jump to 32 bit	1
+6       ORG 0x7c00      9
 
-4       Jump to 32 bit  1
+7       mov si, message 14
 
-4	Decription	4
+8       Multiple        6
 
-5	kernel.asm ->	11
+9       combination     1
 
-6	idt.h		1
+10      jmp 0x7c0:start 8
 
-7	base		14
+11      BIOS Parameter  1
 
-8	Description	4
+15      interrupts      4
 
-9	HEAP_BLOCK_IS	5
+16      implemeting     7
 
-		
+17      mov ah, 2       15
+
+19      0x2             2
+
+19      0x2: LDT        2
+
+20      5. Loading      2
+
+21      5. Loading      4
+
+26      Each ASCII      5
+
+27      return          3
+
+28      video           3
+
+30      se chingaron los values de la primera tabla
+
+36      13.1 IRQs       3
+
+37      1.0 Memory      2
+
+38      1.8 The centry  1 
+
+39      1.12 Malloc     2
+
+41      #define PEACHOS 1
+
+42      2.3.2.1 Heap    2
+
+43      heap->table     5
+
+44      uint32_t        4
+
+45      return bs;      2
+
+46      And done.       3
+
+47      if (res < 0)    4
+
+48      2.2 Virtual     4
+
+49      The exception   3
+
+50      kheap.h         3
+
+51     All the bitmasks 2
+
+52    current_directory 1
+
+53      4. Modifying    2
+
+54      return          2
+
+55      return res;     3
+
+56      2. Reading      2
+
+57      3. Implementing 5
+
+58      return -EIO     6
+
+59      int strnlen     6
+
+60      return len;     4
+
+61     struct path_root 3
+
+62      return path_r   2
+
+63      result_path_    1
+
+64    return path_root  3
+
+65      6. Creating a   2
+
+66      return streamer 2
+
+67      return res      4
+
+68      7.3 FAT16 Boot  6
+
+69      7.10 Filenames  3
+
+70      And that's that 3
+
+71      #define         1
+
+72   struct filesystem* 1
+
+73      We will the     5
+
+74      *fs             3
+
+75      return file_    4
+
+76      disk.filesystem 6
+
+77    struct filesystem 5
+
+78      } __attribute__ 2
+
+79      } __attribute__ 2
+
+80      } __attribute__ 5
+
+81      int id:         4
+
+83      return res;     1
+
+84      return res;     2
+
+85      return res;     6
+
+86      return 0        3
+
+87      return 0        3
+
+89      return res      4
+
+90      return current_ 2
+
+91      fat16_to_proper 2
+
+92      return f_item   1
+
+93     return directory 1
+
+94      return (item->  3
+
+95      return res;     1
+
+96      return res;     1
+
+97      retunr res;     3
+
+98      kfree(item);    3
+
+99      FS_READ_        2
+
+100     Now, I          4
+
+101     THIS            7
+
+102     And we          9
+
+103     return res;     1
+
+104     return res;     5
