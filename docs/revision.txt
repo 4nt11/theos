@@ -1,0 +1,21 @@
+pagina | referencia    | cuantas
+
+2	description	3
+
+3	Jump to 32 bit	1
+
+4       Jump to 32 bit  1
+
+4	Decription	4
+
+5	kernel.asm ->	11
+
+6	idt.h		1
+
+7	base		14
+
+8	Description	4
+
+9	HEAP_BLOCK_IS	5
+
+		
